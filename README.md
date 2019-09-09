@@ -2,6 +2,4 @@
 
 ##Usage example:
 
-- python ex_1.py --theta=0.5 --lr=0.01 --simulations=1 --layers=10 --step_size=0.1
-
-- python ex_2.py --theta=0.5 --lr=0.001 --simulations=1 --layers=25 --step_size=0.5
+- python ex_3.py --lr 1.e-4 --layers 2 --filters 1 --epochs 500 --h 1.0 --batch_size 200 --theta 0.5 --seed 43
