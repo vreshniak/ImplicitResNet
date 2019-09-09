@@ -10,7 +10,7 @@ python ex_3.py --lr 1.e-4 --layers 2 --filters 1 --epochs 500 --h 1.0 --batch_si
 
 - number of CG iterations is limited to some reasonable number so that nonlinear solver does not in fact converge to the true solution. It is not clear to me now if this is the right way to do it
 
-- training can be done in multilevel fashion by going from ``coarse`` to ``fine`` time discretization (--levels option)
+- training can be done in multilevel fashion by going from "coarse" to "fine" time discretization (--levels option)
 
 ## Some observations on the performance:
 
