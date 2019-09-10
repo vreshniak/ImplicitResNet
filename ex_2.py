@@ -1,291 +1,185 @@
-import numpy as np
-import matplotlib.pyplot as plt
-import tensorflow as tf
-from tensorflow.keras.models import Model
-from tensorflow.keras.layers import Layer, Input, Dense
-import tensorflow.keras.backend as K
-from CustomLayers import Antisym
-
+import time
 import argparse
+# import multiprocessing as omp
+import torch.multiprocessing as omp
 
+import numpy as np
+import scipy.linalg as la
+import scipy.sparse.linalg as sla
+import scipy.optimize as opt
+import matplotlib.pyplot as plt
 
+import torch
+import torch.nn as nn
+from torch.autograd import Function
+from torch.nn import Module, Linear, ReLU, Sequential, Tanh
+from torch.utils.tensorboard import SummaryWriter
+from CustomLayers import Antisym, ResNet, TV_regularizer
+import CustomLayers as custom
 
-#########################################################################################
-#########################################################################################
 
 
+if __name__ == '__main__':
+	#########################################################################################
+	#########################################################################################
 
-# Usage example:
-# python ex_2.py --theta=0.5 --lr=0.001 --simulations=1 --layers=25 --step_size=0.5
 
 
 
+	parser = argparse.ArgumentParser()
+	parser.add_argument("--theta",       type=np.float, default=0.0 )
+	parser.add_argument("--lr",          type=np.float, default=0.01)
+	parser.add_argument("--simulations", type=np.int,   default=1   )
+	parser.add_argument("--layers",      type=np.int,   default=10  )
+	parser.add_argument("--levels",      type=np.int,   default=1   )
+	parser.add_argument("--nodes",       type=np.int,   default=1   )
+	parser.add_argument("--h",           type=np.float, default=1   )
+	parser.add_argument("--epochs",      type=np.int,   default=1000)
+	parser.add_argument("--batch_size",  type=np.int,   default=-1  )
+	parser.add_argument("--seed",        type=np.int,   default=np.random.randint(0,10000)  )
+	parser.add_argument("--prefix",      default=None  )
+	args = parser.parse_args()
 
+	theta         = args.theta
+	learning_rate = args.lr
+	simulations   = args.simulations
+	num_layers    = args.layers
+	num_levels    = args.levels
+	num_nodes     = args.nodes
+	step_size     = args.h
+	num_epochs    = args.epochs
+	seed          = args.seed
+	batch_size    = args.batch_size if args.batch_size > 0 else None
 
-#########################################################################################
-#########################################################################################
+	print("        theta: "+str(theta)        )
+	print("learning_rate: "+str(learning_rate))
+	print("       layers: "+str(num_layers)   )
+	print("        nodes: "+str(num_nodes)  )
+	print("    step_size: "+str(step_size)    )
+	print("       levels: "+str(num_levels)   )
+	print("       epochs: "+str(num_epochs)   )
+	print("   batch_size: "+str(batch_size)   )
+	print("  simulations: "+str(simulations)  )
 
 
 
+	if args.prefix is not None:
+		file_name = 'ex_2/'+args.prefix+'_seed_'+str(seed)+'_theta_'+str(theta)+'_h_'+str(step_size)+'_lr_'+str(learning_rate)+\
+					'_levels_'+str(num_levels)+'_layers_'+str(num_layers)+'_nodes_'+str(num_nodes)+'_batch_'+str(batch_size)
+	else:
+		file_name = 'ex_2/seed_'+str(seed)+'_theta_'+str(theta)+'_h_'+str(step_size)+'_lr_'+str(learning_rate)+\
+					'_levels_'+str(num_levels)+'_layers_'+str(num_layers)+'_nodes_'+str(num_nodes)+'_batch_'+str(batch_size)
 
-parser = argparse.ArgumentParser()
-parser.add_argument("--theta", type=np.float, default=0.5)
-parser.add_argument("--lr", type=np.float, default=0.001)
-parser.add_argument("--simulations", type=np.int, default=1)
-parser.add_argument("--layers", type=np.int, default=25)
-parser.add_argument("--step_size", type=np.float, default=0.5)
-args = parser.parse_args()
 
 
-theta = args.theta
-learning_rate = args.lr
-simulations = args.simulations
-num_layers = args.layers
-step_size = args.step_size
+	gpu = torch.device('cuda')
+	cpu = torch.device('cpu')
+	device = cpu
 
-print("theta: "+str(theta))
-print("learning_rate: "+str(learning_rate))
-print("layers: "+str(num_layers))
-print("step_size: "+str(step_size))
-print("simulations: "+str(simulations))
 
 
-K.clear_session(); sess = K.get_session()
-K.set_image_data_format('channels_last')
 
 
+	#########################################################################################
+	#########################################################################################
+	# Data
 
 
+	np.random.seed(10)
 
-#########################################################################################
-#########################################################################################
 
+	num_points = 100
+	angle = np.linspace(0,4*np.pi,num_points)
+	rad   = np.linspace(0,1,num_points)
 
+	# data points
+	x1 = rad * np.array( [ np.cos(angle), np.sin(angle) ] ).astype(np.float)
+	x2 = (rad+0.2) * np.array( [ np.cos(angle), np.sin(angle) ] ).astype(np.float)
+	x  = np.hstack((x1,x2)).T
 
+	# data labels
+	y1 = np.zeros((num_points,1)).astype(np.float)
+	y2 = np.ones((num_points,1)).astype(np.float)
+	y  = np.vstack((y1,y2))
 
+	x_val = x[0::2,:]
+	y_val = y[0::2,:]
+	x = x[1::2,:]
+	y = y[1::2,:]
 
-# basic gradient descent nonlinear solver
-def nsolve(functional,x0,maxiters=100):
-	with tf.name_scope("nsolve"):
-		lmbda = 1.e-5
+	dataset     = torch.utils.data.TensorDataset( torch.from_numpy(x).float(),     torch.from_numpy(y).float()     )
+	val_dataset = torch.utils.data.TensorDataset( torch.from_numpy(x_val).float(), torch.from_numpy(y_val).float() )
 
-		x = x0 - lmbda * tf.gradients(functional(x0),x0)[0]
-		for i in range(maxiters):
-			x = x - lmbda * tf.gradients(functional(x),x)[0]
-		return x
 
-# basic fixed point iteration solver
-def fixed_point(F,x0,maxiters=100):
-	with tf.name_scope("nsolve"):
-		x = x0
-		for i in range(maxiters):
-			x = F(x)
-		return x
+	#########################################################################################
+	#########################################################################################
+	# NN params
 
+	loss_fn            = nn.BCELoss(reduction='sum')
+	accuracy_fn        = lambda y_pred, y: ((y_pred.detach().numpy()>0.5)==y.numpy()).sum() / y.numpy().size
+	weight_initializer = lambda w: torch.nn.init.xavier_uniform_(w,gain=1.0)
+	bias_initializer   = torch.nn.init.zeros_
+	optimizer_fn       = lambda model: torch.optim.Adam(model.parameters(), lr=learning_rate)
+	regularizer        = lambda model: model[1].TV_weights(alpha=0.1)
 
 
+	writer = SummaryWriter('logs/'+file_name)
 
+	#########################################################################################
+	#########################################################################################
+	# NN model
 
-#########################################################################################
-#########################################################################################
 
 
+	def sigma():
+		return Sequential( Antisym(num_nodes,num_nodes,bias=True), Tanh() )
 
+	def get_model(theta, writer, seed=None):
+		if seed is not None:
+			torch.manual_seed(seed)
+		model = Sequential(	Linear(2,out_features=num_nodes,bias=True),
+							ResNet(fun=sigma,num_layers=num_layers,h=step_size,theta=theta,writer=writer),
+							Linear(num_nodes,out_features=1,bias=True),
+							nn.Sigmoid()
+							)
+		custom.initialize( model, weight_initializer, bias_initializer )
+		return model
 
 
-class ImplicitNet_step(Model):
-	'''
-	Class implementing a single step of the implicit residual layer
-	'''
-	def __init__(self,units,h=1,theta=0.5):
-		super(ImplicitNet_step, self).__init__()
-		self.activation = Antisym(units=units,activation='tanh')
-		self.h     = h
-		self.theta = theta
+	model     = get_model(theta, writer, seed )
+	optimizer = optimizer_fn(model)
+	scheduler = None
 
-	def get_kernel(self):
-		return self.activation.get_weights()[0]
 
-	def StepFun(self, x):
-		with tf.name_scope("FUNC"):
-			y = self.activation(x)
-			return self.h*y
-
-	def call(self, x):
-		if self.theta>0:
-			x_shape  = tf.shape(x)
-			Id  = tf.eye(x_shape[1],batch_shape=[x_shape[0]])
-		def implicit_correction():
-			@tf.custom_gradient
-			def fun(y):
-				def grad(dy):
-					with tf.name_scope("Jacobian"):
-						with tf.GradientTape() as g:
-							g.watch(y)
-							z = self.StepFun(y)
-						Jac = g.batch_jacobian(z,y,experimental_use_pfor=False)
-					operator = tf.linalg.LinearOperatorFullMatrix( Id - self.theta*Jac )
-					return operator.solvevec(dy,adjoint=True)
-				return y, grad
-			return fun
-
-		# step_function at previous time step
-		with tf.name_scope("explicit"):
-			F0 = self.StepFun(x)
-			explicit = x + (1-self.theta)*F0
+	for l in range(num_levels):
+		print([model[1].num_layers, model[1].h])
+		custom.train(model, optimizer, num_epochs, dataset, val_dataset, batch_size, loss_fn=loss_fn, accuracy_fn=accuracy_fn, regularizer=regularizer, writer=writer, scheduler=scheduler, epoch0=(l-1)*num_epochs)
+		model     = custom.refine_model(model.cpu()).to(device)
+		optimizer = optimizer_fn(model)
 
-		if self.theta>0:
-			reduction_axes = [ ax for ax in range(1,len(x.get_shape())) ]
-			with tf.name_scope("linsolve"):
-				with tf.name_scope("Jacobian"):
-					with tf.GradientTape() as g:
-						g.watch(x)
-						z = self.StepFun(x)
-					Jac = g.batch_jacobian(z,x)
-				operator = tf.linalg.LinearOperatorFullMatrix( Id - self.theta*Jac )
-				y_linear = x + operator.solvevec(F0,adjoint=False)
-			# guessed nonlinear solution
-			y = explicit + tf.stop_gradient(self.theta*self.StepFun(y_linear))
 
-			with tf.name_scope("nsolve"):
-				residual   = lambda z: z - explicit - self.theta*self.StepFun(z)
-				functional = lambda z: tf.reduce_sum(K.square(residual(z)),axis=reduction_axes)
-				y = nsolve(functional,x0=y,maxiters=20)
-				y = fixed_point(lambda z:explicit+self.theta*self.StepFun(z),x0=y,maxiters=10)
+	# if theta >= 0:
+	# 	custom.train(model, optimizer, num_epochs, dataset, val_dataset, batch_size, loss_fn=loss_fn, accuracy_fn=accuracy_fn, regularizer=regularizer, writer=writer, scheduler=scheduler)
+	# else:
+	# 	model[1].set_theta(0.0)
+	# 	custom.train(model, optimizer, num_epochs//2, dataset, val_dataset, batch_size, loss_fn=loss_fn, accuracy_fn=accuracy_fn, regularizer=regularizer, writer=writer, scheduler=scheduler)
+	# 	model[1].set_theta(np.abs(theta))
+	# 	custom.train(model, optimizer, num_epochs//2, dataset, val_dataset, batch_size, loss_fn=loss_fn, accuracy_fn=accuracy_fn, regularizer=regularizer, writer=writer, scheduler=scheduler, epoch0=num_epochs//2)
 
-			# residuals
-			with tf.name_scope("residuals"):
-				res      = residual(y)
-				res_norm = tf.reduce_mean(K.sqrt(tf.reduce_sum(res*res,axis=reduction_axes)))
-				tf.summary.scalar("residual",res_norm)
 
-			y = explicit + tf.stop_gradient(self.theta*self.StepFun(y))
+	writer.close()
 
-			return implicit_correction()(y)
-		else:
-			return explicit
+	# torch.save(model.state_dict(),'./models/'+file_name)
 
 
+	#########################################################################################
+	#########################################################################################
 
 
-class ODENet(Model):
-	def __init__(self,num_layers=10,num_units=4,h=1):
-		super(ODENet,self).__init__()
-		self.num_layers = num_layers
-		self.num_units  = num_units
-
-		self.step = []
-		for t in range(self.num_layers):
-			self.step.append( ImplicitNet_step(units=num_units,h=h,theta=theta) )
-
-	def TV_regularizer(self):
-		old_kernel = self.step[0].get_kernel()
-		kernel = self.step[1].get_kernel()
-		R = tf.reduce_sum( K.square( kernel - old_kernel ) )
-		old_kernel = kernel
-		for t in range(2,self.num_layers):
-			kernel = self.step[t].get_kernel()
-			R = R + tf.reduce_sum( K.square( kernel - old_kernel ) )
-			old_kernel = kernel
-		return R
-
-	def call(self, x):
-		y = Dense(units=self.num_units,activation='linear')(x)
-		for t in range(self.num_layers):
-			y = self.step[t](y)
-		return y
-
-
-
-#########################################################################################
-#########################################################################################
-
-
-
-num_points = 513
-angle = np.linspace(0,4*np.pi,num_points)
-rad   = np.linspace(0,1,num_points)
-
-# data points
-x1 = rad * np.array( [ np.cos(angle), np.sin(angle) ] )
-x2 = (rad+0.2) * np.array( [ np.cos(angle), np.sin(angle) ] )
-x  = np.hstack((x1,x2)).T
-
-# data labels
-y1 = np.zeros((num_points,1))
-y2 = np.ones((num_points,1))
-y  = np.vstack((y1,y2))
-
-x_val = x[0::2,:]
-y_val = y[0::2,:]
-x = x[1::2,:]
-y = y[1::2,:]
-
-data_shape = x[0].shape
-
-
-
-
-#########################################################################################
-#########################################################################################
-
-
-
-
-def Loss(model,h):
-	def loss(y_true,y_pred):
-		return K.square(y_true-y_pred) + 0.1/model.num_layers*model.TV_regularizer()
-	return loss
-
-def Accuracy(y_true,y_pred):
-	return K.square(y_true-y_pred)
-
-
-ODE_model = ODENet(num_layers=25,num_units=6,h=step_size)
-
-inputs  = Input(shape=data_shape,dtype='float32')
-outputs = ODE_model(inputs)
-outputs = Dense(units=1,activation='sigmoid',use_bias=True)(outputs)
-
-optimizer = tf.keras.optimizers.Adam(lr=learning_rate)
-callback = tf.keras.callbacks.TensorBoard(log_dir='./logs',histogram_freq=1,write_grads=False,update_freq='epoch')
-
-model = Model(inputs=inputs, outputs=outputs)
-ODE_model.summary()
-model.summary()
-model.compile(optimizer=optimizer,loss='binary_crossentropy',metrics=['accuracy'])
-
-
-
-
-#########################################################################################
-#########################################################################################
-
-
-
-
-for s in range(simulations):
-	try:
-		history = model.fit( x, y, batch_size=10, epochs=300, callbacks=[callback], validation_data=(x_val,y_val))
-	except:
-		print("")
-		print("Oops!!!!!!!!!!!!!!")
-		print("")
-
-
-
-
-#########################################################################################
-#########################################################################################
-
-
-
-
-
-xx, yy = np.meshgrid( np.linspace(-1.5,1.5,200), np.linspace(-1.5,1.5,200) )
-x_test = np.array([xx.ravel(),yy.ravel()]).T
-labels = model.predict(x_test)>0.5
-plt.contourf(xx, yy, labels.reshape(xx.shape))
-plt.plot(x1[0,:],x1[1,:])
-plt.plot(x2[0,:],x2[1,:])
-plt.show()
+	# xx, yy = np.meshgrid( np.linspace(-1.5,1.5,200), np.linspace(-1.5,1.5,200) )
+	# x_test = np.array([xx.ravel(),yy.ravel()]).T
+	# labels = model(torch.from_numpy(x_test).float()).detach().numpy()>0.5
+	# plt.contourf(xx, yy, labels.reshape(xx.shape))
+	# plt.plot(x1[0,:],x1[1,:],'o')
+	# plt.plot(x2[0,:],x2[1,:],'o')
+	# plt.show()
