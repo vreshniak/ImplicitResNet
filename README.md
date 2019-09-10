@@ -16,6 +16,6 @@ python ex_3.py --lr 1.e-4 --layers 2 --filters 1 --epochs 500 --h 1.0 --batch_si
 
 - the loss of implicit ResNet is often worse than that of ResNet but validation loss is usually better for identical architectures (but different \theta) with identical seeds
 
+- typical behavior for the validation accuracy of classification (MNIST dataset of size 1000):
 
-![Alt text](./accuracy_validation.svg)
 <img src="./accuracy_validation.svg">
