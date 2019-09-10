@@ -1,6 +1,7 @@
 ## Usage example:
 
 python ex_2.py --lr 1.e-4 --layers 2 --nodes 10 --epochs 500 --h 1.0 --batch_size 200 --theta 0.5 --levels 1 --seed 43
+
 python ex_3.py --lr 1.e-4 --layers 2 --filters 1 --epochs 500 --h 1.0 --batch_size 200 --theta 0.5 --levels 1 --seed 43
 
 ## A few notes on the implementation:
