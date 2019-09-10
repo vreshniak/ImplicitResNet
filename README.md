@@ -15,3 +15,7 @@ python ex_3.py --lr 1.e-4 --layers 2 --filters 1 --epochs 500 --h 1.0 --batch_si
 - implicit code is obviously much slover. There is a lot of room for improvement here, not only for implementation but also for the design of a network itself (special structures with cheap solvers, preconditioners, etc.)
 
 - the loss of implicit ResNet is often worse than that of ResNet but validation loss is usually better for identical architectures (but different \theta) with identical seeds
+
+
+![Alt text](./accuracy_validation.svg)
+<img src="./accuracy_validation.svg">
