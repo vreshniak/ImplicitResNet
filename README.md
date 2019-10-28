@@ -11,6 +11,8 @@ python ex_MNIST.py --lr 1.e-2 --layers 5 --filters 8 --epochs 100 --h 1 --batch 
 
 - fp_iters - number of fixed point iterations
 
+## Link to the tensorboard file with test run:
+https://drive.google.com/open?id=1_MI-BI9cG2-wWuWeu0ZoEt6BY0IZ2-Eg
 
 # (09/10/2019):
 
