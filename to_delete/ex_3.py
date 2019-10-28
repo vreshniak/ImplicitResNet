@@ -88,8 +88,8 @@ if __name__ == '__main__':
 
 	dataset     = torchvision.datasets.MNIST("./MNIST", train=True,  transform=transform, target_transform=None, download=True)
 	val_dataset = torchvision.datasets.MNIST("./MNIST", train=False, transform=transform, target_transform=None, download=True)
-	dataset     = torch.utils.data.Subset(dataset,     np.arange(1000))
-	val_dataset = torch.utils.data.Subset(val_dataset, np.arange(1000))
+	# dataset     = torch.utils.data.Subset(dataset,     np.arange(1000))
+	# val_dataset = torch.utils.data.Subset(val_dataset, np.arange(1000))
 	# for i in range(5):
 	# 	print(dataset[i][0][0])
 	# 	plt.imshow(dataset[i][0][0])
@@ -148,19 +148,21 @@ if __name__ == '__main__':
 	scheduler = None
 
 
-	for l in range(num_levels):
-		print([model[1].num_layers, model[1].h])
-		custom.train(model, optimizer, num_epochs, dataset, val_dataset, batch_size, loss_fn=loss_fn, accuracy_fn=accuracy_fn, regularizer=regularizer, writer=writer, scheduler=scheduler, epoch0=(l-1)*num_epochs)
-		model     = custom.refine_model(model.cpu()).to(device)
-		optimizer = optimizer_fn(model)
-
-	# if theta >= 0:
-	# 	custom.train(model, optimizer, num_epochs, dataset, val_dataset, batch_size, loss_fn=loss_fn, accuracy_fn=accuracy_fn, regularizer=regularizer, writer=writer, scheduler=scheduler, device=device)
-	# else:
-	# 	optimizer = optimizer_fn(model); model[1].set_theta(0.0)
-	# 	custom.train(model, optimizer, num_epochs//2, dataset, val_dataset, batch_size, loss_fn=loss_fn, accuracy_fn=accuracy_fn, regularizer=regularizer, writer=writer, scheduler=scheduler, device=device)
-	# 	optimizer = optimizer_fn(model); model[1].set_theta(np.abs(theta))
-	# 	custom.train(model, optimizer, num_epochs//2, dataset, val_dataset, batch_size, loss_fn=loss_fn, accuracy_fn=accuracy_fn, regularizer=regularizer, writer=writer, scheduler=scheduler, epoch0=num_epochs//2, device=device)
+	if theta >= 0:
+		for l in range(num_levels):
+			print([l, model[1].num_layers, model[1].h])
+			custom.train(model, optimizer, num_epochs, dataset, val_dataset, batch_size, loss_fn=loss_fn, accuracy_fn=accuracy_fn, regularizer=regularizer, writer=writer, scheduler=scheduler, epoch0=l*num_epochs)
+			model     = custom.refine_model(model.cpu()).to(device)
+			optimizer = optimizer_fn(model)
+	else:
+		model[1].set_theta(0.0)
+		for l in range(num_levels):
+			print([l, model[1].num_layers, model[1].h])
+			custom.train(model, optimizer, num_epochs, dataset, val_dataset, batch_size, loss_fn=loss_fn, accuracy_fn=accuracy_fn, regularizer=regularizer, writer=writer, scheduler=scheduler, epoch0=l*num_epochs)
+			model     = custom.refine_model(model.cpu()).to(device)
+			optimizer = optimizer_fn(model)
+		model[1].set_theta(np.abs(theta))
+		custom.train(model, optimizer, num_epochs, dataset, val_dataset, batch_size, loss_fn=loss_fn, accuracy_fn=accuracy_fn, regularizer=regularizer, writer=writer, scheduler=scheduler, epoch0=num_levels*num_epochs)
 
 
 	writer.close()
