@@ -5,7 +5,7 @@ python ex_MNIST.py --lr 1.e-2 --layers 5 --filters 8 --epochs 100 --h 1 --batch 
 
 ## Important hyperparameters:
 
-- theta - implicitness of the method, theta=0.5 is a second order trapezoidla scheme
+- theta - implicitness of the method, theta=0.5 is a second order trapezoidal scheme
 
 - beta - contribution of the residuals used as a regularizer
 
