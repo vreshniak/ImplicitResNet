@@ -3,8 +3,16 @@
 ## Usage example:
 python ex_MNIST.py --lr 1.e-2 --layers 5 --filters 8 --epochs 100 --h 1 --batch 100 --seed 1 --simulations 1 --theta 0.0 --beta 0 --fp_iters 0
 
+## Important hyperparameters:
 
-# (10/28/2019):
+- theta - implicitness of the method, theta=0.5 is a second order trapezoidla scheme
+
+- beta - contribution of the residuals used as a regularizer
+
+- fp_iters - number of fixed point iterations
+
+
+# (09/10/2019):
 
 ## Usage example:
 
