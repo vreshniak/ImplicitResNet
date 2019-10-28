@@ -1,6 +1,9 @@
 # Update (10/28/2019):
 
 ## Usage example:
+python ex_MNIST.py --lr 1.e-2 --layers 5 --filters 8 --epochs 100 --h 1 --batch 100 --seed 1 --simulations 1 --theta 0.0 --beta 0 --fp_iters 0
+
+## Usage example:
 
 python ex_2.py --lr 1.e-4 --layers 2 --nodes 10 --epochs 500 --h 1.0 --batch_size -1 --theta 0.5 --levels 1 --seed 43
 
