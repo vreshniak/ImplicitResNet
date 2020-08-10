@@ -1,3 +1,11 @@
+# Update (08/09/2020):
+
+## Usage example:
+```
+./run.sh train
+./run.sh plot
+```
+
 # Update (10/28/2019):
 
 ## Usage example:
