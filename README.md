@@ -1,5 +1,10 @@
 # Update (08/09/2020):
 
+## Prerequisites:
+```
+pip install git+https://github.com/facebookresearch/jacobian_regularizer
+```
+
 ## Usage example:
 ```
 ./run.sh train
