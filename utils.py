@@ -30,7 +30,7 @@ from torch.utils.tensorboard import SummaryWriter
 ###############################################################################
 
 class training_loop:
-	def __init__(self,model,dataset,val_dataset,batch_size,loss_fn,accuracy_fn=None,optimizer=None,regularizer=None,scheduler=None,lr_schedule=None,writer=None,write_hist=False,history=False,checkpoint=None):
+	def __init__(self,model,dataset,val_dataset,batch_size,loss_fn,accuracy_fn=None,optimizer=None,regularizer=None,scheduler=None,lr_schedule=None,writer=None,write_hist=False,history=False,checkpoint=None,init_epoch=0):
 		self.model = model
 		self.optimizer = optimizer
 		# batch_shuffle = True
@@ -51,7 +51,7 @@ class training_loop:
 		self.writer = writer
 		self.write_hist = write_hist
 		self.history = history
-		self.curr_epoch = 0
+		self.curr_epoch = init_epoch
 		self.checkpoint=checkpoint
 
 	def __call__(self,num_epochs,optimizer=None,scheduler=None,lr_schedule=None,regularizer=None,checkpoint=None):
@@ -306,14 +306,150 @@ def train(model,optimizer,num_epochs,dataset,val_dataset,batch_size,loss_fn,accu
 							break
 					else:
 						model0 = model
-					for name, weight in model0.named_parameters():
-						if weight.grad is not None:
-							writer.add_scalar('mean_param_value/'+name, weight.abs().mean(),      epoch+epoch0)
-							writer.add_scalar('mean_param_grad/'+name,  weight.grad.abs().mean(), epoch+epoch0)
-							# writer.add_histogram('parameters/'+name,    weight,      epoch+epoch0, bins='tensorflow')
-							# writer.add_histogram('gradients/'+name,     weight.grad, epoch+epoch0, bins='tensorflow')
+					# for name, weight in model0.named_parameters():
+					# 	if weight.grad is not None:
+					# 		writer.add_scalar('mean_param_value/'+name, weight.abs().mean(),      epoch+epoch0)
+					# 		writer.add_scalar('mean_param_grad/'+name,  weight.grad.abs().mean(), epoch+epoch0)
+					# 		writer.add_histogram('parameters/'+name,    weight,      epoch+epoch0, bins='tensorflow')
+					# 		writer.add_histogram('gradients/'+name,     weight.grad, epoch+epoch0, bins='tensorflow')
 	if history:
 		return loss_history
+
+
+
+
+###############################################################################
+###############################################################################
+
+
+
+def directional_derivative(fun, input, direction, create_graph=True):
+	input  = input.detach().requires_grad_(True)
+	output = fun(input)
+
+	# v = direction.detach().requires_grad_(True)
+	v = torch.ones_like(output).requires_grad_(True)
+
+	# normalize direction
+	batch_dim = direction.size(0)
+	dir_norm  = torch.clamp( direction.reshape((batch_dim,-1)).norm(dim=1, keepdim=True), min=1.e-16 ) # avoid division by zero
+	direction = direction / dir_norm
+
+	grad_x = torch.autograd.grad(
+		outputs=output,
+		inputs=input,
+		grad_outputs=v,
+		create_graph=True)[0]
+
+	grad_v, = torch.autograd.grad(
+		outputs=grad_x,
+		inputs=v,
+		grad_outputs=direction.detach(),
+		create_graph=create_graph)  # need create_graph to find it's derivative
+
+	return grad_v
+
+
+
+class TraceJacobianReg(torch.nn.Module):
+	def __init__(self, n=1):
+		super().__init__()
+		self.n = n
+
+	def forward(self, fun, input, create_graph=True):
+		'''
+		Compute trace and Frobenius norm of the Jacobian averaged over the batch dimension
+		'''
+		batch_dim = input.size(0)
+
+		input  = input.detach().requires_grad_(True)
+		output = fun(input)
+
+		div = jac = 0
+		if hasattr(fun, 'trace'):
+			div = fun.trace(input).sum() * self.n
+
+		# Randomized version based on Hutchinson algorithm for trace estimation
+		for _ in range(self.n):
+			v = torch.randn_like(output)
+			v_jac, = torch.autograd.grad(
+				outputs=output,
+				inputs=input,
+				grad_outputs=v,
+				create_graph=create_graph,  # need create_graph to find it's derivative
+				only_inputs=True)
+			if not hasattr(fun, 'trace'):
+				div = div + (v*v_jac).sum()
+			jac = jac + v_jac.pow(2).sum()
+
+		return div/self.n/batch_dim, jac/self.n/batch_dim
+# class TraceJacobianReg(torch.nn.Module):
+# 	def __init__(self, n=1, div=True, jac=False):
+# 		super().__init__()
+# 		self.n = n
+# 		self.is_div = div
+# 		self.is_jac = jac
+
+# 	def forward(self, output, input, create_graph=True):
+# 		'''
+# 		Compute Frobenius norm of the Jacobian averaged over batch dimension
+# 		'''
+# 		batch_dim = input.size()[0]
+
+# 		div = jac = 0
+# 		if not self.is_div and not self.is_jac:
+# 			return div, jac
+
+# 		# Randomized version based on Hutchinson algorithm for trace estimation
+# 		for _ in range(self.n):
+# 			v = torch.randn_like(output)
+# 			v_jac, = torch.autograd.grad(
+# 				outputs=output,
+# 				inputs=input,
+# 				grad_outputs=v,
+# 				create_graph=create_graph,  # need create_graph to find it's derivative
+# 				only_inputs=True)
+# 			if self.is_div: div = div + (v*v_jac).sum()
+# 			if self.is_jac: jac = jac + v_jac.pow(2).sum()
+
+# 		return div/self.n/batch_dim, jac/self.n/batch_dim
+
+
+
+class JacDiagReg(torch.nn.Module):
+	def __init__(self, n=1, value=None):
+		super().__init__()
+		self.n = n
+		self.value = value
+
+	def forward(self, fun, input, create_graph=True):
+		'''
+		Compute stochastic estimate of the Jacobian diagonal:
+		Bekas, C., Kokiopoulou, E., Saad, Y.: An estimator for the diagonal of a matrix. Appl. Numer. Math. 57(11), 1214–1229 (2007)
+		'''
+		batch_dim = input.size(0)
+
+		input  = input.detach().requires_grad_(True)
+		output = fun(input)
+
+		t = 0
+		q = 0
+		for _ in range(self.n):
+			v = torch.randn_like(output)
+			v_jac, = torch.autograd.grad(
+				outputs=output,
+				inputs=input,
+				grad_outputs=v,
+				create_graph=create_graph,  # need create_graph to find it's derivative
+				only_inputs=True)
+			t = t + v*v_jac
+			q = q + v*v
+
+		if self.value is not None:
+			return ((t/q)-self.value).pow(2).sum() / batch_dim
+		else:
+			return t / q
+			# return (t / q).reshape((batch_dim,-1))
 
 
 
@@ -338,29 +474,29 @@ def jacobian(output, input, create_graph=False):
 	return torch.stack(jacobian, dim=0).reshape(output.shape+input.shape)
 
 
-def divergence(output, input, create_graph=False):
-	jac = jacobian(output, input, create_graph).reshape((output.shape[0],output.numel()//output.shape[0],input.shape[0],input.numel()//input.shape[0]))
-	return torch.stack([ jac[i,:,i,:].diag().sum() for i in range(output.shape[0]) ], dim=0)
+# def divergence(output, input, create_graph=False):
+# 	jac = jacobian(output, input, create_graph).reshape((output.shape[0],output.numel()//output.shape[0],input.shape[0],input.numel()//input.shape[0]))
+# 	return torch.stack([ jac[i,:,i,:].diag().sum() for i in range(output.shape[0]) ], dim=0)
 
 
 
-class divreg(torch.nn.Module):
-	def __init__(self, n=1):
-		self.n = n
-		super(divreg, self).__init__()
+# class divreg(torch.nn.Module):
+# 	def __init__(self, n=1):
+# 		self.n = n
+# 		super(divreg, self).__init__()
 
-	def forward(self, output, input, create_graph=False):
-		reg = 0
-		for i in range(self.n):
-			v = torch.randn_like(input)
-			jac_v, = torch.autograd.grad(
-				outputs=output,
-				inputs=input,
-				grad_outputs=v,
-				create_graph=create_graph,  # need create_graph to find it's derivative
-				only_inputs=True)
-			reg = reg + (v*jac_v).sum()
-		return reg / self.n / input.size()[0]
+# 	def forward(self, output, input, create_graph=False):
+# 		reg = 0
+# 		for i in range(self.n):
+# 			v = torch.randn_like(input)
+# 			jac_v, = torch.autograd.grad(
+# 				outputs=output,
+# 				inputs=input,
+# 				grad_outputs=v,
+# 				create_graph=create_graph,  # need create_graph to find it's derivative
+# 				only_inputs=True)
+# 			reg = reg + (v*jac_v).sum()
+# 		return reg / self.n / input.size()[0]
 
 
 

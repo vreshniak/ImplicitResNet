@@ -1,3 +1,7 @@
 checkpoints
 logs
+out
+*.pdf
+*.eps
+.DS_Store
 __pycache__
