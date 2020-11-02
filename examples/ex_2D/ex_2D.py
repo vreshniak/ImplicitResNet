@@ -38,9 +38,6 @@ if __name__ == '__main__':
 	file_name   = ex_setup.make_name(args)
 	script_name = sys.argv[0][:-3]
 
-	# print(layers.ode_solver( ex_setup.rhs_mlp(2, args, final_activation=None) ))
-	# print(type(layers.ode_solver))
-	# exit()
 
 	#########################################################################################
 	#########################################################################################
@@ -85,35 +82,7 @@ if __name__ == '__main__':
 				return torch.from_numpy(data).float(), torch.from_numpy(labels.ravel()).float()
 
 
-	# ntrain = args.datasize
-	# angle  = np.linspace(0,8*np.pi,ntrain)
-	# rad    = np.linspace(0,4,ntrain)
-
-	# # data points
-	# x1 = rad * np.array( [ np.cos(angle), np.sin(angle) ] ).astype(np.float)
-	# x2 = (rad+0.5) * np.array( [ np.cos(angle), np.sin(angle) ] ).astype(np.float)
-	# xtrain  = np.hstack((x1,x2)).T
-
-	# # data labels
-	# y1 = np.zeros((ntrain,1)).astype(np.float)
-	# y2 = np.ones((ntrain,1)).astype(np.float)
-	# ytrain  = np.vstack((y1,y2))
-
-	# x_val = xtrain[0::2,:]
-	# y_val = ytrain[0::2,:]
-	# # x_val = xtrain[0:2:2,:]
-	# # y_val = ytrain[0:2:2,:]
-	# xtrain = xtrain[1::2,:]
-	# ytrain = ytrain[1::2,:]
-	# ytrain = ytrain.ravel()
-	# y_val = y_val.ravel()
-
 	xtrain, ytrain, x_val, y_val = get_data(args.datasize, True)
-
-	# print(ytrain)
-	# plt.plot(xtrain[:,0],xtrain[:,1],'-')
-	# plt.show()
-	# exit()
 
 	dataset     = torch.utils.data.TensorDataset( xtrain, ytrain )
 	val_dataset = torch.utils.data.TensorDataset( x_val,  y_val  )
@@ -214,20 +183,6 @@ if __name__ == '__main__':
 			out['val']   = self.net[2](out['yT'])
 			out['label'] = torch.sigmoid(out['val'])>0.5
 
-			# # hidden state
-			# out['y0'] = self.net[0](x)
-			# out['yt'] = self.net[1](out['y0'], evolution=True)
-			# out['yT'] = out['yt'][-1]
-
-			# # first two dims
-			# out['x0'] = x
-			# out['xt'] = [ self.net[2](y) for y in out['yt'] ]
-			# out['xT'] = out['xt'][-1]
-
-			# # final labels
-			# out['val']   = self.net[3](out['xT'])
-			# out['label'] = torch.sigmoid(out['val'])>0.5
-
 			# convert everything to numpy arrays
 			for key, value in out.items():
 				if isinstance(value, list):
@@ -268,26 +223,6 @@ if __name__ == '__main__':
 	Path("checkpoints",subdir,"epoch0").mkdir(parents=True, exist_ok=True)
 	logdir = Path("logs",subdir,file_name)
 	writer = SummaryWriter(logdir) if args.epochs>0 else None
-
-	# if args.mode=="init":
-	# 	writer = SummaryWriter(logdir)
-
-	# 	model       = get_model(args.seed)
-	# 	optimizer   = optimizer_Adam(model, args.lr)
-	# 	scheduler   = None
-	# 	regularizer = None
-
-	# 	train_obj = utils.training_loop(model, dataset, val_dataset, args.batch, optimizer=optimizer, scheduler=scheduler, loss_fn=loss_fn, accuracy_fn=accuracy_fn, regularizer=regularizer,
-	# 				writer=writer, write_hist=True, history=False, checkpoint=None)
-
-	# 	# initialize with analytic continuation
-	# 	for theta in np.linspace(0,1,101):
-	# 		model.apply(lambda m: setattr(m,'theta',theta))
-	# 		train_obj(args.epochs)
-	# 		torch.save( model.state_dict(), Path("checkpoints",subdir,"%4.2f"%(theta)) )
-
-	# 	if writer is not None:
-	# 		writer.close()
 
 	if args.mode!="plot":
 		writer = SummaryWriter(logdir)
@@ -376,47 +311,15 @@ if __name__ == '__main__':
 
 			#########################################################################################
 			#########################################################################################
-			# title_prefix = str(args.theta)+'_'+str(args.T)+'_'
 
 			###############################################
 			# prepare data
 
-			# print(xtest.shape)
-			# exit()
-
 			xtest0, xtest1 = get_data(1000, separate_labels=True)
-
-			# propagation of train data through layers
-			# ytrain0  = model.net[0](torch.from_numpy(xtrain).float())
-			# ytrain1  = model.net[1](ytrain0, evolution=True)
-			# ytrainxy = model.net[2].net[0](ytrain1[-1])
-			# ytrain2  = model.net[2](ytrain1[-1])
-
 
 			out_train = model.propagate(xtrain)
 			out_test0 = model.propagate(xtest0)
 			out_test1 = model.propagate(xtest1)
-
-
-			# propagation of test data through layers
-			# ytest0  = model.net[0](torch.from_numpy(xtest).float())
-			# ytest1  = model.net[1](ytest0, evolution=True)
-			# ytestxy = model.net[2].net[0](ytest1[-1])
-			# ytest2  = model.net[2](ytest1[-1])
-
-			# convert to numpy arrays
-			# ytrain0  = ytrain0.detach().numpy()
-			# ytrain1  = ytrain1.detach().numpy()
-			# ytrain2  = ytrain2.detach().numpy()
-			# ytrainxy = ytrainxy.detach().numpy()
-			# ytest0   = ytest0.detach().numpy()
-			# ytest1   = ytest1.detach().numpy()
-			# ytestxy  = ytestxy.detach().numpy()
-			# ytest2 = ytest2.detach().numpy()
-
-			# plt.plot(np.sort(ytrain2), '.')
-			# plt.show()
-			# exit()
 
 
 			###############################################
@@ -456,37 +359,6 @@ if __name__ == '__main__':
 			# Linear classifier
 			plt.figure(fig_no); fig_no += 1
 
-			# slices = list(combinations(np.arange(2+args.codim),2))
-			# for ind in slices:
-			# 	# Path("out",subdir,"slice%d_%d"%(ind[0],ind[1])).mkdir(parents=True, exist_ok=True)
-			# 	plt.cla()
-			# 	xT_train = out_train['yT'][:,ind]
-			# 	xT_test0 = out_test0['yT'][:,ind]
-			# 	xT_test1 = out_test1['yT'][:,ind]
-
-			# 	x_min, x_max = xT_train[:, 0].min() - 1, xT_train[:, 0].max() + 1
-			# 	y_min, y_max = xT_train[:, 1].min() - 1, xT_train[:, 1].max() + 1
-			# 	xx1, yy1 = np.meshgrid( np.arange(x_min, x_max, plot_step), np.arange(y_min, y_max, plot_step) )
-			# 	xplotlin = np.zeros((xx1.size, 2+args.codim))
-			# 	xplotlin[:,ind[0]] = xx1.ravel()
-			# 	xplotlin[:,ind[1]] = yy1.ravel()
-			# 	yplotlin = model.net[2](torch.from_numpy(xplotlin).float())
-			# 	yplotlin = torch.sigmoid(yplotlin).detach().numpy()>0.5
-
-			# 	plt.contourf(xx1, yy1, yplotlin.reshape(xx1.shape), cmap=mycmap)# plt.cm.Paired)
-			# 	plt.scatter(xT_train[idx0, 0], xT_train[idx0, 1], c='blue', s=20)
-			# 	plt.scatter(xT_train[idx1, 0], xT_train[idx1, 1], c='red',  s=20)
-			# 	plt.plot(xT_test0[:,0], xT_test0[:,1], '-b')
-			# 	plt.plot(xT_test1[:,0], xT_test1[:,1], '-r')
-
-			# 	plt.gca().axes.xaxis.set_visible(False)
-			# 	plt.gca().axes.yaxis.set_visible(False)
-			# 	plt.gca().axis('off')
-			# 	# plt.savefig(data_name.replace(subdir,subdir+"/slice%d_%d"%(ind[0],ind[1]))+"_result_lin.pdf", pad_inches=0.0, bbox_inches='tight')
-			# 	plt.savefig(data_name+"slice%d_%d"%(ind[0],ind[1])+".pdf", pad_inches=0.0, bbox_inches='tight')
-
-
-
 			xT_train = model.project_on_plane(out_train['yT'])
 			xT_test0 = model.project_on_plane(out_test0['yT'])
 			xT_test1 = model.project_on_plane(out_test1['yT'])
@@ -494,11 +366,7 @@ if __name__ == '__main__':
 			x_min, x_max = xT_train[:, 0].min() - 1, xT_train[:, 0].max() + 1
 			y_min, y_max = xT_train[:, 1].min() - 1, xT_train[:, 1].max() + 1
 			xx1, yy1 = np.meshgrid( np.arange(x_min, x_max, plot_step), np.arange(y_min, y_max, plot_step) )
-			# xplotlin = np.hstack((xx1.reshape(-1,1), yy1.reshape(-1,1)))
-			# yplotlin = model.net[2](torch.from_numpy(xplotlin).float())
-			# yplotlin = torch.sigmoid(yplotlin).detach().numpy()>0.5
 
-			# plt.contourf(xx1, yy1, yplotlin.reshape(xx1.shape), cmap=mycmap)# plt.cm.Paired)
 			plt.contourf(xx1, yy1, yy1>0, cmap=mycmap)# plt.cm.Paired)
 			plt.scatter(xT_train[idx0, 0], xT_train[idx0, 1], c='blue', s=20)
 			plt.scatter(xT_train[idx1, 0], xT_train[idx1, 1], c='red', s=20)
@@ -508,28 +376,6 @@ if __name__ == '__main__':
 			plt.gca().axes.yaxis.set_visible(False)
 			plt.gca().axis('off')
 			plt.savefig(data_name+"result_lin.pdf", pad_inches=0.0, bbox_inches='tight')
-
-
-			# x_min, x_max = out_train['xT'][:, 0].min() - 1, out_train['xT'][:, 0].max() + 1
-			# y_min, y_max = out_train['xT'][:, 1].min() - 1, out_train['xT'][:, 1].max() + 1
-			# xx1, yy1 = np.meshgrid( np.arange(x_min, x_max, plot_step), np.arange(y_min, y_max, plot_step) )
-			# xplotlin = np.hstack((xx1.reshape(-1,1), yy1.reshape(-1,1)))
-			# yplotlin = model.net[3](torch.from_numpy(xplotlin).float())
-			# yplotlin = torch.sigmoid(yplotlin).detach().numpy()>0.5
-
-			# plt.contourf(xx1, yy1, yplotlin.reshape(xx1.shape), cmap=mycmap)# plt.cm.Paired)
-			# # for i, c in zip(range(2), ['blue', 'red']):
-			# # 	idx = np.where(ytrain == i)
-			# # 	plt.scatter(out_train['xT'][idx, 0], out_train['xT'][idx, 1], c=c, s=20)
-			# plt.scatter(out_train['xT'][idx0, 0], out_train['xT'][idx0, 1], c='blue', s=20)
-			# plt.scatter(out_train['xT'][idx1, 0], out_train['xT'][idx1, 1], c='red', s=20)
-			# plt.plot(out_test0['xT'][:,0], out_test0['xT'][:,1], '-b')
-			# plt.plot(out_test1['xT'][:,0], out_test1['xT'][:,1], '-r')
-			# plt.gca().axes.xaxis.set_visible(False)
-			# plt.gca().axes.yaxis.set_visible(False)
-			# plt.gca().axis('off')
-			# plt.savefig(data_name+"_result_lin.pdf", pad_inches=0.0, bbox_inches='tight')
-
 
 
 			###############################################
@@ -607,28 +453,6 @@ if __name__ == '__main__':
 					# plt.savefig(data_name.replace(subdir,subdir+"/evol"+"/slice%d_%d"%(ind[0],ind[1]))+"_result_%d.pdf"%(t), pad_inches=0.0, bbox_inches='tight')
 					plt.savefig(data_name+"evol"+"/slice%d_%d"%(ind[0],ind[1])+"/%d.pdf"%(t), pad_inches=0.0, bbox_inches='tight')
 
-			# x_min = y_min =  1e3
-			# x_max = y_max = -1e3
-			# for t in range(len(out_train['xt'])):
-			# 	x_min, x_max = min(x_min, out_test0['xt'][t][:, 0].min()), max(x_max, out_test0['xt'][t][:, 0].max())
-			# 	y_min, y_max = min(y_min, out_test0['xt'][t][:, 1].min()), max(y_max, out_test0['xt'][t][:, 1].max())
-			# for t in range(len(out_train['xt'])):
-			# 	plt.cla()
-			# 	# plot training data
-			# 	idx0, idx1 = np.where(ytrain == 0), np.where(ytrain == 1)
-			# 	plt.scatter(out_train['xt'][t][idx0, 0], out_train['xt'][t][idx0, 1], c='blue', s=20)
-			# 	plt.scatter(out_train['xt'][t][idx1, 0], out_train['xt'][t][idx1, 1], c='red', s=20)
-			# 	# plot test data
-			# 	plt.plot(out_test0['xt'][t][:,0], out_test0['xt'][t][:,1], '-b')
-			# 	plt.plot(out_test1['xt'][t][:,0], out_test1['xt'][t][:,1], '-r')
-			# 	plt.xlim(x_min-1, x_max+1)
-			# 	plt.ylim(y_min-1, y_max+1)
-			# 	plt.gca().axes.xaxis.set_visible(False)
-			# 	plt.gca().axes.yaxis.set_visible(False)
-			# 	plt.gca().axis('off')
-			# 	plt.savefig(data_name.replace(subdir,subdir+"/evol")+"_result_%d.pdf"%(t), pad_inches=0.0, bbox_inches='tight')
-
-
 
 			###############################################
 			# evaluate spectrum
@@ -650,38 +474,6 @@ if __name__ == '__main__':
 
 			spectrum = np.concatenate(spectrum)
 
-
-			# spectrum_train = []
-			# spectrum_test  = []
-			# ind = np.random.choice(xtest.shape[0],1,replace=True)
-			# for t in range(len(out_train['yt'])):
-			# 	spectrum_train.append( rhs_obj.spectrum(t, out_train['yt'][t]) )
-			# 	spectrum_test.append( rhs_obj.spectrum(t, out_plot['yt'][t][ind,:]) )
-			# spectrum_train = np.array(spectrum_train)
-			# spectrum_test  = np.array(spectrum_test)
-
-			# xmax = ymax = 5
-			# xmax = max( np.amax(np.abs(spectrum_train[...,0])), xmax );  ymax = max( np.amax(np.abs(spectrum_train[...,1])), ymax )
-			# xmax = max( np.amax(np.abs(spectrum_test[...,0])),  xmax );  ymax = max( np.amax(np.abs(spectrum_test[...,1])),  ymax )
-			# xmax = max(xmax,ymax); ymax = max(xmax,ymax)
-
-			# # np.savetxt( data_name+"_eig1.txt", np.sqrt(spectrum_test[-1,1::2,0]**2+spectrum_test[-1,1::2,1]**2), delimiter=',')
-			# # np.savetxt( data_name+"_eig2.txt", np.sqrt(spectrum_test[-1,::2,0]**2+spectrum_test[-1,::2,1]**2), delimiter=',')
-
-			# spectrum_train = np.concatenate(spectrum_train)
-			# spectrum_test  = np.concatenate(spectrum_test)
-
-			# kernel = stats.gaussian_kde(spectrum_train.T)
-			# eig_alpha = kernel(spectrum_train.T).T
-			# eig_alpha = eig_alpha / np.amax(eig_alpha)
-			# fig = plt.figure(fig_no); fig_no += 1
-			# zz = kernel(xtest.T).reshape(xx.shape)
-			# print(zz.shape)
-			# plt.imshow(zz, cmap=plt.cm.gist_earth_r, extent=[x_min, x_max, y_min, y_max])
-			# plt.show()
-			# exit()
-			# np.savetxt( data_name+"_eig_train.txt", np.concatenate(spectrum_train), delimiter=',')
-			# np.savetxt( data_name+"_eig_test.txt",  np.concatenate(spectrum_test),  delimiter=',')
 
 			###############################################
 			# plot stability function
