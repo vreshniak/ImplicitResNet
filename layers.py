@@ -7,6 +7,8 @@ import scipy.optimize as opt
 import matplotlib.pyplot as plt
 from pathlib import Path
 
+from abc import ABCMeta, abstractmethod
+
 import torch
 from torch.autograd import Function
 from torch.nn import Linear, ReLU, Conv2d, Module, Sequential
@@ -25,7 +27,7 @@ import utils
 
 # global parameters
 _TOL = 1.e-6
-_linTOL = 1.e-8
+_linTOL = 1.e-6
 _max_iters = 100
 
 _collect_stat  = True
@@ -45,52 +47,54 @@ _backward_scipy = False
 ###############################################################################
 
 
-class neumann_backprop(Function):
-	@staticmethod
-	def forward(ctx, y, y_fp):
-		# ctx.obj = obj
-		ctx.save_for_backward(y, y_fp)
-		return y
+# class neumann_backprop(Function):
+# 	@staticmethod
+# 	def forward(ctx, y, y_fp):
+# 		# ctx.obj = obj
+# 		ctx.save_for_backward(y, y_fp)
+# 		return y
 
-	@staticmethod
-	def backward(ctx, dy):
-		y, y_fp, = ctx.saved_tensors
+# 	@staticmethod
+# 	def backward(ctx, dy):
+# 		y, y_fp, = ctx.saved_tensors
 
-		# residual = lambda dx: (dx-A_dot(dx)-dy).flatten().norm() # \| (I-A) * dx - dy \|
-		A_dot    = lambda x: torch.autograd.grad(y_fp, y, grad_outputs=x, retain_graph=True, only_inputs=True)[0]
-		residual = lambda Adx: (Adx-dy).reshape((dy.size()[0],-1)).norm(dim=1).max() #.flatten().norm() # \| (I-A) * dx - dy \|
+# 		# residual = lambda dx: (dx-A_dot(dx)-dy).flatten().norm() # \| (I-A) * dx - dy \|
+# 		A_dot    = lambda x: torch.autograd.grad(y_fp, y, grad_outputs=x, retain_graph=True, only_inputs=True)[0]
+# 		residual = lambda Adx: (Adx-dy).reshape((dy.size()[0],-1)).norm(dim=1).max() #.flatten().norm() # \| (I-A) * dx - dy \|
 
-		tol = atol = torch.tensor(_TOL)
-		TOL = torch.max(tol*dy.norm(), atol)
+# 		tol = atol = torch.tensor(_TOL)
+# 		TOL = torch.max(tol*dy.norm(), atol)
 
-		#######################################################################
-		# Neumann series
+# 		#######################################################################
+# 		# Neumann series
 
-		dx  = dy
-		Ady = A_dot(dy)
-		Adx = Ady
-		r1  = residual(dx-Adx)
-		neu_iters = 1
-		while r1>=TOL and neu_iters<_max_iters:
-			r0  = r1
-			dx  = dx + Ady
-			Ady = A_dot(Ady)
-			Adx = Adx + Ady
-			r1  = residual(dx-Adx)
-			neu_iters += 1
-			assert r1<r0, "Neumann series hasn't converged at iteration "+str(neu_iters)+" out of "+str(_max_iters)+" max iterations"
+# 		dx  = dy
+# 		Ady = A_dot(dy)
+# 		Adx = Ady
+# 		r1  = residual(dx-Adx)
+# 		neu_iters = 1
+# 		while r1>=TOL and neu_iters<_max_iters:
+# 			r0  = r1
+# 			dx  = dx + Ady
+# 			Ady = A_dot(Ady)
+# 			Adx = Adx + Ady
+# 			r1  = residual(dx-Adx)
+# 			neu_iters += 1
+# 			assert r1<r0, "Neumann series hasn't converged at iteration "+str(neu_iters)+" out of "+str(_max_iters)+" max iterations"
 
-		if _collect_stat:
-			global _backward_stat
-			_backward_stat['steps']        = _backward_stat.get('steps',0) + 1
-			_backward_stat['neu_residual'] = _backward_stat.get('neu_residual',0) + r1
-			_backward_stat['neu_iters']    = _backward_stat.get('neu_iters',0) + neu_iters
-		return None, dx
+# 		if _collect_stat:
+# 			global _backward_stat
+# 			_backward_stat['steps']        = _backward_stat.get('steps',0) + 1
+# 			_backward_stat['neu_residual'] = _backward_stat.get('neu_residual',0) + r1
+# 			_backward_stat['neu_iters']    = _backward_stat.get('neu_iters',0) + neu_iters
+# 		return None, dx
+
 
 
 class linsolve_backprop(Function):
 	@staticmethod
 	def forward(ctx, self, y, y_fp):
+		ctx.mark_non_differentiable(y)
 		ctx.save_for_backward(y, y_fp)
 		ctx.self = self
 		return y_fp
@@ -101,15 +105,18 @@ class linsolve_backprop(Function):
 		ndof  = y.nelement()
 		batch_dim = dy.size()[0]
 
-		ctx.residual  = 0
+		ctx.residual  = 1
 		ctx.lin_iters = 0
 
-		tol = atol = torch.tensor(_linTOL)
-		TOL = torch.max(tol*dy.norm(), atol)
+		# freeze parameters so that .backward() does not propagate corresponding gradients
+		ctx.self.rhs.requires_grad_(False)
 
 		if _backward_scipy:
-			A_dot    = lambda x: torch.autograd.grad(y_fp, y, grad_outputs=x, retain_graph=True, only_inputs=True)[0]
-			residual_fn = lambda Adx: (Adx-dy).reshape((dy.size()[0],-1)).norm(dim=1).max() # \| (I-A) * dx - dy \|
+			tol = atol = torch.tensor(_linTOL)
+			TOL = torch.max(tol*dy.norm(), atol)
+
+			A_dot       = lambda x: torch.autograd.grad(y_fp, y, grad_outputs=x, create_graph=False, retain_graph=True, only_inputs=True)[0]
+			residual_fn = lambda Adx: (Adx-dy).reshape((dy.size(0),-1)).norm(dim=1).max() # \| (I-A) * dx - dy \|
 
 			#######################################################################
 
@@ -129,29 +136,32 @@ class linsolve_backprop(Function):
 			dx, info = sla.lgmres( A, dy.cpu().detach().numpy().ravel(), x0=dy.cpu().detach().numpy().ravel(), maxiter=_max_iters, tol=TOL, atol=atol, M=None )
 			dx = torch.from_numpy(dx).view_as(dy).to(device=dy.device, dtype=dy.dtype)
 
-			ctx.residual = residual_fn(dx-A_dot(dx))
-
+			ctx.residual = residual_fn(dx-A_dot(dx)).detach()
 		else:
 			A_dot = lambda x: torch.autograd.grad(y_fp, y, grad_outputs=x, create_graph=True, only_inputs=True)[0] # need create_graph to find it's derivative
 
 			# initial condition
 			dx = dy.clone().detach().requires_grad_(True)
+
 			nsolver = torch.optim.LBFGS([dx], lr=1, max_iter=_max_iters, max_eval=None, tolerance_grad=1.e-9, tolerance_change=1.e-9, history_size=5, line_search_fn='strong_wolfe')
 			def closure():
 				nsolver.zero_grad()
-				ctx.residual = ( dx - A_dot(dx) - dy ).pow(2).sum() / batch_dim
-				if ctx.residual>_linTOL:
-					ctx.residual.backward(retain_graph=True)
+				residual = ( dx - A_dot(dx) - dy ).pow(2).sum() / batch_dim
+				if residual>_linTOL**2:
+					residual.backward(retain_graph=True)
+				ctx.residual = torch.sqrt(residual)
 				ctx.lin_iters += 1
 				return ctx.residual
 			nsolver.step(closure)
-			# dx = dx.detach()
+			dx = dx.detach()
+
+		# unfreeze parameters
+		ctx.self.rhs.requires_grad_(True)
 
 		if _collect_stat:
-			# global _backward_stat
-			ctx.self.backward_stat['steps']        = ctx.self.backward_stat.get('steps',0) + 1
-			ctx.self.backward_stat['lin_residual'] = ctx.self.backward_stat.get('lin_residual',0) + ctx.residual if isinstance(ctx.residual,int) else ctx.residual.detach() #(dx-A_dot(dx))
-			ctx.self.backward_stat['lin_iters']    = ctx.self.backward_stat.get('lin_iters',0)    + ctx.lin_iters
+			ctx.self._stat['backward/steps']        = ctx.self._stat.get('backward/steps',0)        + 1
+			ctx.self._stat['backward/lin_residual'] = ctx.self._stat.get('backward/lin_residual',0) + ctx.residual if isinstance(ctx.residual,int) else ctx.residual.detach() #(dx-A_dot(dx))
+			ctx.self._stat['backward/lin_iters']    = ctx.self._stat.get('backward/lin_iters',0)    + ctx.lin_iters
 
 		ctx.residual  = 0
 		ctx.lin_iters = 0
@@ -159,335 +169,241 @@ class linsolve_backprop(Function):
 
 
 
-class fp_step(Module):
-	def __init__(self, rhs, t, h=1, theta=0.0):
-		super(fp_step,self).__init__()
+# class fp_step(Module):
+# 	def __init__(self, rhs, t, h=1, theta=0.0):
+# 		super(fp_step,self).__init__()
 
-		########################################
-		self.rhs       = rhs
-		self.t         = t
-		self.h         = h
-		self.theta     = theta
-		self.theta_h   = theta * h
-		########################################
+# 		########################################
+# 		self.rhs       = rhs
+# 		self.t         = t
+# 		self.h         = h
+# 		self.theta     = theta
+# 		self.theta_h   = theta * h
+# 		########################################
 
-		# self.forward_stat = { 'residual_in': 0, 'residual_out': 0, 'fp_iters': 0}
-		self.regularizers = { 'Lipschitz': 0 }
-		# self.fstep     = 0
-		# self.converged = 0
+# 		# self.forward_stat = { 'residual_in': 0, 'residual_out': 0, 'fp_iters': 0}
+# 		self.regularizers = { 'Lipschitz': 0 }
+# 		# self.fstep     = 0
+# 		# self.converged = 0
 
-		# self.device = self.parameters().__next__().device
-		# self.dtype  = self.parameters().__next__().dtype
+# 		# self.device = self.parameters().__next__().device
+# 		# self.dtype  = self.parameters().__next__().dtype
 
-	@property
-	def h(self):
-		return self._h
-	@h.setter
-	def h(self, h):
-		self._h = h
+# 	@property
+# 	def h(self):
+# 		return self._h
+# 	@h.setter
+# 	def h(self, h):
+# 		self._h = h
 
-	@property
-	def theta(self):
-		return self._theta
-	@theta.setter
-	def theta(self, theta):
-		self._theta = theta
+# 	@property
+# 	def theta(self):
+# 		return self._theta
+# 	@theta.setter
+# 	def theta(self, theta):
+# 		self._theta = theta
 
-	def forward(self, y, param):
-		fp_iters = 0
-		success  = True
-		y_in = y.clone()
+# 	def forward(self, y, param):
+# 		fp_iters = 0
+# 		success  = True
+# 		y_in = y.clone()
 
-		# explicit part
-		explicit = y_in if self.theta==1 else y_in + (1-self.theta) * self.h * self.rhs(self.t, y_in, param)
+# 		# explicit part
+# 		explicit = y_in if self.theta==1 else y_in + (1-self.theta) * self.h * self.rhs(self.t, y_in, param)
 
-		# fixed point map and residual
-		def fixed_point_map(x):
-			y = explicit + self.theta_h * self.rhs(self.t, x, param)
-			return y, (y-x).reshape((y.size()[0],-1)).norm(dim=1).mean()
-		def residual_fun(x0):
-			x1, r1 = fixed_point_map(x0)
-			return r1
+# 		# fixed point map and residual
+# 		def fixed_point_map(x):
+# 			y = explicit + self.theta_h * self.rhs(self.t, x, param)
+# 			return y, (y-x).reshape((y.size()[0],-1)).norm(dim=1).mean()
+# 		def residual_fun(x0):
+# 			x1, r1 = fixed_point_map(x0)
+# 			return r1
 
-		TOL = torch.max(_TOL*self.theta_h*self.rhs(self.t, y_in, param).norm(), torch.tensor(_TOL))
+# 		TOL = torch.max(_TOL*self.theta_h*self.rhs(self.t, y_in, param).norm(), torch.tensor(_TOL))
 
-		# self.regularizers['Lipschitz'] = 0.0
-		if self.theta>0:
-			with torch.no_grad():
-				y1, r1 = fixed_point_map(y_in); fp_iters+=1
-				while fp_iters<_max_iters and r1>TOL:
-					y0, r0 = y1, r1
-					y1, r1 = fixed_point_map(y0)
-					# print((y0-y1))
-					# print(fp_iters, r1/r0, r1, self.theta_h * self.rhs(self.t, y0, param).norm())
-					# self.regularizers['Lipschitz'] = self.regularizers['Lipschitz'] + r1 / r0.detach()
-					if r1>r0:
-						y1, r1  = y0, r0
-						success = False
-						if self.training:
-							# print(y0-y1)
-							assert success, "Fixed-point iteration hasn't converged at iteration "+str(fp_iters)+" out of "+str(_max_iters)+" max iterations"
-						break
-					fp_iters+=1
-				# self.regularizers['Lipschitz'] = self.regularizers['Lipschitz'] / (fp_iters-1) if fp_iters>1 else 0.0
-				# exit()
-				if self.training:
-					assert r1<=TOL, "Fixed-point iteration hasn't converged with residual "+str(r1)+"after "+str(fp_iters)+" iterations"
+# 		# self.regularizers['Lipschitz'] = 0.0
+# 		if self.theta>0:
+# 			with torch.no_grad():
+# 				y1, r1 = fixed_point_map(y_in); fp_iters+=1
+# 				while fp_iters<_max_iters and r1>TOL:
+# 					y0, r0 = y1, r1
+# 					y1, r1 = fixed_point_map(y0)
+# 					# print((y0-y1))
+# 					# print(fp_iters, r1/r0, r1, self.theta_h * self.rhs(self.t, y0, param).norm())
+# 					# self.regularizers['Lipschitz'] = self.regularizers['Lipschitz'] + r1 / r0.detach()
+# 					if r1>r0:
+# 						y1, r1  = y0, r0
+# 						success = False
+# 						if self.training:
+# 							# print(y0-y1)
+# 							assert success, "Fixed-point iteration hasn't converged at iteration "+str(fp_iters)+" out of "+str(_max_iters)+" max iterations"
+# 						break
+# 					fp_iters+=1
+# 				# self.regularizers['Lipschitz'] = self.regularizers['Lipschitz'] / (fp_iters-1) if fp_iters>1 else 0.0
+# 				# exit()
+# 				if self.training:
+# 					assert r1<=TOL, "Fixed-point iteration hasn't converged with residual "+str(r1)+"after "+str(fp_iters)+" iterations"
 
-			y = y1
-			if self.training:
-				y = y.detach().requires_grad_(True)
-				y_fp, _ = fixed_point_map(y)
-				y = neumann_backprop.apply(y, y_fp)
-		else:
-			y = explicit
+# 			y = y1
+# 			if self.training:
+# 				y = y.detach().requires_grad_(True)
+# 				y_fp, _ = fixed_point_map(y)
+# 				y = neumann_backprop.apply(y, y_fp)
+# 		else:
+# 			y = explicit
 
-		if _collect_stat:
-			global _forward_stat
-			mode = 'train/' if self.training else 'val/'
-			_forward_stat[mode+'steps']        = _forward_stat.get(mode+'steps',0)        + 1
-			_forward_stat[mode+'residual_in']  = _forward_stat.get(mode+'residual_in',0)  + residual_fun(y_in).detach().numpy()
-			_forward_stat[mode+'residual_out'] = _forward_stat.get(mode+'residual_out',0) + residual_fun(y).detach().numpy()
-			_forward_stat[mode+'fp_iters']     = _forward_stat.get(mode+'fp_iters',0)     + fp_iters
-		return y
-
-
-class ode_step(Module):
-	def __init__(self, rhs, t, h=1, theta=0.0, method='outer', tol=_TOL):
-		super(ode_step,self).__init__()
-
-		self.tol = tol
-		self.rhs = rhs
-		self.t   = t
-		self.h   = h
-		self.method = method
-		self.register_buffer('_theta', torch.tensor(theta))
-
-		self.forward_stat  = {}
-		self.backward_stat = {}
+# 		if _collect_stat:
+# 			global _forward_stat
+# 			mode = 'train/' if self.training else 'val/'
+# 			_forward_stat[mode+'steps']        = _forward_stat.get(mode+'steps',0)        + 1
+# 			_forward_stat[mode+'residual_in']  = _forward_stat.get(mode+'residual_in',0)  + residual_fun(y_in).detach().numpy()
+# 			_forward_stat[mode+'residual_out'] = _forward_stat.get(mode+'residual_out',0) + residual_fun(y).detach().numpy()
+# 			_forward_stat[mode+'fp_iters']     = _forward_stat.get(mode+'fp_iters',0)     + fp_iters
+# 		return y
 
 
-	@property
-	def h(self):
-		return self._h
-	@h.setter
-	def h(self, h):
-		self._h = h
+# class ode_step(Module):
+# 	def __init__(self, rhs, t, h=1, theta=0.0, method='outer', tol=_TOL):
+# 		super(ode_step,self).__init__()
 
-	@property
-	def theta(self):
-		return self._theta
-	@theta.setter
-	def theta(self, theta):
-		self._theta.fill_(theta)
+# 		self.tol = tol
+# 		self.rhs = rhs
+# 		self.t   = t
+# 		self.h   = h
+# 		self.method = method
+# 		self.register_buffer('_theta', torch.tensor(theta))
 
-
-	def residual(self, xy, fval=[None, None], param=None):
-		x, y = xy
-		batch_dim = x.size(0)
-		if self.method=='inner':
-			t = self.t + self.theta * self.h
-			z = ( 0 if self.theta==1 else (1-self.theta)*x ) + self.theta*y
-			f = self.rhs(t, z, param)
-		elif self.method=='outer':
-			fx = fval[0] if fval[0] is not None else ( 0 if self.theta==1 else self.rhs(self.t, x, param) )
-			fy = fval[1] if fval[1] is not None else self.rhs(self.t+self.h, y, param)
-			f  = (1-self.theta) * fx + self.theta * fy
-		return ( y - x - self.h * f  ).pow(2).sum() / batch_dim
+# 		self.forward_stat  = {}
+# 		self.backward_stat = {}
 
 
-	def forward(self, x, param=None):
-		cg_iters  = [0] # need list to access cg_iters by reference from def closure()
-		residual  = [0] # same for residual
-		batch_dim = x.size(0)
+# 	@property
+# 	def h(self):
+# 		return self._h
+# 	@h.setter
+# 	def h(self, h):
+# 		self._h = h
 
-		if self.theta>0:
-			if self.method=='outer':
-				theta_h = self.theta * self.h
-
-				# explicit part
-				explicit = x if self.theta==1 else x + (1-self.theta) * self.h * self.rhs(self.t, x, param)
-
-				# fixed point map and residual
-				fp_map       = lambda z: explicit + theta_h * self.rhs(self.t+1, z, param)
-				# residual_fun = lambda z: ( z - explicit.detach() - theta_h * self.rhs(self.t+1, z, param) ).pow(2).sum() / batch_dim
-				# residual_fun = lambda z: ( z - x.detach() - (1-self.theta) * self.h * self.rhs(self.t, x, param).detach() - theta_h * self.rhs(self.t+1, z, param) ).pow(2).sum() / batch_dim
-			elif self.method=='inner':
-				# fixed point map and residual
-				fp_map       = lambda z: x + self.h * self.rhs(self.t+self.theta, ((1-self.theta)*x if self.theta<1 else 0) + self.theta*z, param)
-				# residual_fun = lambda z: ( z - x.detach() - self.h * self.rhs(self.t+self.theta, ((1-self.theta)*x.detach() if self.theta<1 else 0) + self.theta*z, param) ).pow(2).sum() / batch_dim
-
-			fx = None if self.method=='inner' else self.rhs(self.t, x, param).detach()
-
-			# initial condition (make new leaf node which requires gradient)
-			# y = explicit.detach().requires_grad_(True)
-			# y = y_in.detach().requires_grad_(True)
-			y = x.clone().detach().requires_grad_(True)
-
-			if _forward_scipy: # use SciPy solver
-
-				def functional(z):
-					z0   = torch.from_numpy(z).view_as(x).to(device=y.device,dtype=y.dtype).requires_grad_(True)
-					fun  = residual_fun(z0)
-					print(fun)
-					dfun = torch.autograd.grad(fun, z0)[0] # no retain_graph because derivative through nonlinearity is different at each iteration
-					return fun.cpu().detach().numpy().astype(np.double), dfun.cpu().detach().numpy().ravel().astype(np.double)
-				# opt_res = opt.minimize(functional, x.cpu().detach().numpy(), method='CG', jac=True, tol=_TOL, options={'maxiter': _max_iters,'disp': False})
-				opt_res = opt.minimize(functional, y.cpu().detach().numpy(), method='L-BFGS-B', jac=True, tol=_TOL, options={'maxiter': _max_iters,'disp': False})
-
-				y = torch.from_numpy(opt_res.x).view_as(x).to(device=y.device,dtype=y.dtype)
-				residual[0] = torch.tensor(opt_res.fun).to(device=y.device,dtype=y.dtype)
-				cg_iters[0], success = opt_res.nit, opt_res.success
-
-				# assert success, "CG solver hasn't converged with residual "+str(r.detach().numpy())+" at iteration "+str(cg_iters)+" out of "+str(_max_iters)+" max iterations"
-				# assert r<=1.e-3, "CG solver hasn't converged with residual "+str(r.detach().numpy())+" after "+str(cg_iters)+" iterations"
-
-				if self.training:
-					y_fp = fixed_point_map(y.requires_grad_(True)) # required_grad_(True) to compute Jacobian in linsolve_backprop
-					y    = linsolve_backprop.apply(self, y, y_fp)
-
-				# print(residual[0])
-				# print('-------------')
-				# exit()
-
-			else: # use PyTorch solver
-				self.rhs.eval()					# freeze spectral normalization
-				self.rhs.requires_grad_(False)	# freeze parameters
-
-				# NOTE: in torch.optim.LBFGS, all norms are max norms hence no need to account for batch size in tolerance_grad & tolerance_change
-				nsolver = torch.optim.LBFGS([y], lr=1, max_iter=_max_iters, max_eval=None, tolerance_grad=1.e-9, tolerance_change=1.e-9, history_size=10, line_search_fn='strong_wolfe')
-				def closure():
-					cg_iters[0] += 1
-					nsolver.zero_grad()
-					residual[0] = self.residual([x.detach(),y], [fx,None], param)
-					# residual[0] = residual_fun(y)
-					# residual[0] = ( y - explicit.detach() - theta_h * self.rhs(self.t+1, y, param) ).pow(2).sum() / batch_dim
-					# residual[0] = ( y - explicit.detach() - self.theta_h * self.rhs(self.t, y, param) ).reshape((batch_dim,-1)).pow(2).sum(dim=1).mean()
-					if residual[0]>self.tol:
-						residual[0].backward()
-					return residual[0]
-				nsolver.step(closure)
-
-				# assert residual[0]<1.e-2, 'Error: divergence at t=%d, residual is %.2E'%(self.t, residual[0].detach().numpy())
-				if residual[0]>self.tol:
-					print('Warning: convergence not achieved at t=%d, residual is %.2E'%(self.t, residual[0].detach().numpy()))
-
-				# TODO: what if some parameters need to have requires_grad=False?
-				self.rhs.requires_grad_(True)		# unfreeze parameters
-				self.rhs.train(mode=self.training)	# unfreeze spectral normalization
-
-			y = linsolve_backprop.apply(self, y, fp_map(y))
-		else:
-			y = x + self.h * self.rhs(self.t, x, param)
+# 	@property
+# 	def theta(self):
+# 		return self._theta
+# 	@theta.setter
+# 	def theta(self, theta):
+# 		self._theta.fill_(theta)
 
 
-		if _collect_stat:
-			mode = 'train/' if self.training else 'val/'
-			#######################
-			self.forward_stat[mode+'steps']    = self.forward_stat.get(mode+'steps',0)    + 1
-			self.forward_stat[mode+'iters']    = self.forward_stat.get(mode+'iters',0)    + cg_iters[0]
-			#######################
-			# self.forward_stat[mode+'residual_in']  = self.forward_stat.get(mode+'residual_in',0)  + residual_fun(x).detach()
-			self.forward_stat[mode+'residual'] = self.forward_stat.get(mode+'residual',0) + residual[0] if isinstance(residual[0],int) else residual[0].detach()
-			#######################
-
-		# cg_iters  = [0]
-		# residual  = [0]
-		return y
-
-	# def forward(self, x, param=None):
-	# 	cg_iters  = [0] # need this to access cg_iters by reference from def closure()
-	# 	residual  = [0]
-	# 	batch_dim = x.size()[0]
-
-	# 	theta_h = self.theta * self.h
-
-	# 	# RHS at the left endpoint
-	# 	rhs_l = self.h * self.rhs(self.t, x, param)
-
-	# 	# explicit part
-	# 	explicit = x if self.theta==1 else x + (1-self.theta) * rhs_l
-
-	# 	# fixed point map and residual
-	# 	fixed_point_map = lambda z: explicit + theta_h * self.rhs(self.t, z, param)
-	# 	residual_fun    = lambda z: (z-fixed_point_map(z)).pow(2).sum() / batch_dim
-	# 	# residual_fun    = lambda z: (fixed_point_map(z)-z).reshape((batch_dim,-1)).norm(dim=1).mean()
-	# 	# residual_fun    = lambda z: (fixed_point_map(z)-z).reshape((batch_dim,-1)).pow(2).sum(dim=1).mean()
-
-	# 	if self.theta>0:
-	# 		# initial condition (make new leaf node which requires gradient)
-	# 		# y = explicit.detach().requires_grad_(True)
-	# 		# y = y_in.detach().requires_grad_(True)
-	# 		y = x.clone().detach().requires_grad_(True)
-
-	# 		if _forward_scipy: # use SciPy solver
-
-	# 			def functional(z):
-	# 				z0   = torch.from_numpy(z).view_as(x).to(device=y.device,dtype=y.dtype).requires_grad_(True)
-	# 				fun  = residual_fun(z0)
-	# 				print(fun)
-	# 				dfun = torch.autograd.grad(fun, z0)[0] # no retain_graph because derivative through nonlinearity is different at each iteration
-	# 				return fun.cpu().detach().numpy().astype(np.double), dfun.cpu().detach().numpy().ravel().astype(np.double)
-	# 			# opt_res = opt.minimize(functional, x.cpu().detach().numpy(), method='CG', jac=True, tol=_TOL, options={'maxiter': _max_iters,'disp': False})
-	# 			opt_res = opt.minimize(functional, y.cpu().detach().numpy(), method='L-BFGS-B', jac=True, tol=_TOL, options={'maxiter': _max_iters,'disp': False})
-
-	# 			y = torch.from_numpy(opt_res.x).view_as(x).to(device=y.device,dtype=y.dtype)
-	# 			residual[0] = torch.tensor(opt_res.fun).to(device=y.device,dtype=y.dtype)
-	# 			cg_iters[0], success = opt_res.nit, opt_res.success
-
-	# 			# assert success, "CG solver hasn't converged with residual "+str(r.detach().numpy())+" at iteration "+str(cg_iters)+" out of "+str(_max_iters)+" max iterations"
-	# 			# assert r<=1.e-3, "CG solver hasn't converged with residual "+str(r.detach().numpy())+" after "+str(cg_iters)+" iterations"
-
-	# 			if self.training:
-	# 				y_fp = fixed_point_map(y.requires_grad_(True)) # required_grad_(True) to compute Jacobian in linsolve_backprop
-	# 				y    = linsolve_backprop.apply(self, y, y_fp)
-
-	# 			# print(residual[0])
-	# 			# print('-------------')
-	# 			# exit()
-
-	# 		else: # use PyTorch solver
-	# 			self.rhs.eval()					# freeze spectral normalization
-	# 			self.rhs.requires_grad_(False)	# freeze parameters
-
-	# 			# NOTE: in torch.optim.LBFGS, all norms are max norms hence no need to account for batch size in tolerance_grad & tolerance_change
-	# 			nsolver = torch.optim.LBFGS([y], lr=1, max_iter=_max_iters, max_eval=None, tolerance_grad=1.e-9, tolerance_change=1.e-9, history_size=10, line_search_fn='strong_wolfe')
-	# 			def closure():
-	# 				cg_iters[0] += 1
-	# 				nsolver.zero_grad()
-	# 				residual[0] = ( y - explicit.detach() - theta_h * self.rhs(self.t+1, y, param) ).pow(2).sum() / batch_dim
-	# 				# residual[0] = ( y - x.detach() - self.h * self.rhs(self.t, (1-self.theta)*x.detach()+self.theta*y, param) ).pow(2).sum() / batch_dim
-	# 				# residual[0] = ( y - explicit.detach() - self.theta_h * self.rhs(self.t, y, param) ).reshape((batch_dim,-1)).pow(2).sum(dim=1).mean()
-	# 				if residual[0]>_TOL:
-	# 					residual[0].backward()
-	# 				return residual[0]
-	# 			nsolver.step(closure)
-
-	# 			# TODO: what if some parameters need to have requires_grad=False?
-	# 			self.rhs.requires_grad_(True)		# unfreeze parameters
-	# 			self.rhs.train(mode=self.training)	# unfreeze spectral normalization
-
-	# 		# RHS at the right endpoint
-	# 		rhs_r = self.h * self.rhs(self.t+1, y, param)
-	# 		y = linsolve_backprop.apply(self, y, explicit + self.theta * rhs_r)
-	# 	else:
-	# 		y = explicit
+# 	def residual(self, xy, fval=[None, None], param=None):
+# 		x, y = xy
+# 		batch_dim = x.size(0)
+# 		if self.method=='inner':
+# 			t = self.t + self.theta * self.h
+# 			z = ( 0 if self.theta==1 else (1-self.theta)*x ) + self.theta*y
+# 			f = self.rhs(t, z, param)
+# 		elif self.method=='outer':
+# 			fx = fval[0] if fval[0] is not None else ( 0 if self.theta==1 else self.rhs(self.t, x, param) )
+# 			fy = fval[1] if fval[1] is not None else self.rhs(self.t+self.h, y, param)
+# 			f  = (1-self.theta) * fx + self.theta * fy
+# 		return ( y - x - self.h * f  ).pow(2).sum() / batch_dim
 
 
-	# 	# assert residual_fun(y).detach()<_TOL, "ode_step did not converge "+str(residual_fun(y).detach())
-	# 	if _collect_stat:
-	# 		mode = 'train/' if self.training else 'val/'
-	# 		#######################
-	# 		self.forward_stat[mode+'steps']        = self.forward_stat.get(mode+'steps',0)        + 1
-	# 		self.forward_stat[mode+'cg_iters']     = self.forward_stat.get(mode+'cg_iters',0)     + cg_iters[0]
-	# 		#######################
-	# 		self.forward_stat[mode+'residual_in']  = self.forward_stat.get(mode+'residual_in',0)  + residual_fun(x).detach()
-	# 		self.forward_stat[mode+'residual_out'] = self.forward_stat.get(mode+'residual_out',0) + residual[0] if isinstance(residual[0],int) else residual[0].detach() #residual_fun(y)
-	# 		#######################
+# 	def forward(self, x, param=None):
+# 		cg_iters  = [0] # need list to access cg_iters by reference from def closure()
+# 		residual  = [0] # same for residual
+# 		batch_dim = x.size(0)
 
-	# 	cg_iters  = [0]
-	# 	residual  = [0]
-	# 	return y
+# 		if self.theta>0:
+# 			if self.method=='outer':
+# 				theta_h = self.theta * self.h
+
+# 				# explicit part
+# 				explicit = x if self.theta==1 else x + (1-self.theta) * self.h * self.rhs(self.t, x, param)
+
+# 				# fixed point map and residual
+# 				fp_map       = lambda z: explicit + theta_h * self.rhs(self.t+1, z, param)
+# 				# residual_fun = lambda z: ( z - explicit.detach() - theta_h * self.rhs(self.t+1, z, param) ).pow(2).sum() / batch_dim
+# 				# residual_fun = lambda z: ( z - x.detach() - (1-self.theta) * self.h * self.rhs(self.t, x, param).detach() - theta_h * self.rhs(self.t+1, z, param) ).pow(2).sum() / batch_dim
+# 			elif self.method=='inner':
+# 				# fixed point map and residual
+# 				fp_map       = lambda z: x + self.h * self.rhs(self.t+self.theta, ((1-self.theta)*x if self.theta<1 else 0) + self.theta*z, param)
+# 				# residual_fun = lambda z: ( z - x.detach() - self.h * self.rhs(self.t+self.theta, ((1-self.theta)*x.detach() if self.theta<1 else 0) + self.theta*z, param) ).pow(2).sum() / batch_dim
+
+# 			fx = None if self.method=='inner' else self.rhs(self.t, x, param).detach()
+
+# 			# initial condition (make new leaf node which requires gradient)
+# 			# y = explicit.detach().requires_grad_(True)
+# 			# y = y_in.detach().requires_grad_(True)
+# 			y = x.clone().detach().requires_grad_(True)
+
+# 			if _forward_scipy: # use SciPy solver
+
+# 				def functional(z):
+# 					z0   = torch.from_numpy(z).view_as(x).to(device=y.device,dtype=y.dtype).requires_grad_(True)
+# 					fun  = residual_fun(z0)
+# 					print(fun)
+# 					dfun = torch.autograd.grad(fun, z0)[0] # no retain_graph because derivative through nonlinearity is different at each iteration
+# 					return fun.cpu().detach().numpy().astype(np.double), dfun.cpu().detach().numpy().ravel().astype(np.double)
+# 				# opt_res = opt.minimize(functional, x.cpu().detach().numpy(), method='CG', jac=True, tol=_TOL, options={'maxiter': _max_iters,'disp': False})
+# 				opt_res = opt.minimize(functional, y.cpu().detach().numpy(), method='L-BFGS-B', jac=True, tol=_TOL, options={'maxiter': _max_iters,'disp': False})
+
+# 				y = torch.from_numpy(opt_res.x).view_as(x).to(device=y.device,dtype=y.dtype)
+# 				residual[0] = torch.tensor(opt_res.fun).to(device=y.device,dtype=y.dtype)
+# 				cg_iters[0], success = opt_res.nit, opt_res.success
+
+# 				# assert success, "CG solver hasn't converged with residual "+str(r.detach().numpy())+" at iteration "+str(cg_iters)+" out of "+str(_max_iters)+" max iterations"
+# 				# assert r<=1.e-3, "CG solver hasn't converged with residual "+str(r.detach().numpy())+" after "+str(cg_iters)+" iterations"
+
+# 				if self.training:
+# 					y_fp = fixed_point_map(y.requires_grad_(True)) # required_grad_(True) to compute Jacobian in linsolve_backprop
+# 					y    = linsolve_backprop.apply(self, y, y_fp)
+
+# 				# print(residual[0])
+# 				# print('-------------')
+# 				# exit()
+
+# 			else: # use PyTorch solver
+# 				self.rhs.eval()					# freeze spectral normalization
+# 				self.rhs.requires_grad_(False)	# freeze parameters
+
+# 				# NOTE: in torch.optim.LBFGS, all norms are max norms hence no need to account for batch size in tolerance_grad & tolerance_change
+# 				nsolver = torch.optim.LBFGS([y], lr=1, max_iter=_max_iters, max_eval=None, tolerance_grad=1.e-9, tolerance_change=1.e-9, history_size=10, line_search_fn='strong_wolfe')
+# 				def closure():
+# 					cg_iters[0] += 1
+# 					nsolver.zero_grad()
+# 					residual[0] = self.residual([x.detach(),y], [fx,None], param)
+# 					# residual[0] = residual_fun(y)
+# 					# residual[0] = ( y - explicit.detach() - theta_h * self.rhs(self.t+1, y, param) ).pow(2).sum() / batch_dim
+# 					# residual[0] = ( y - explicit.detach() - self.theta_h * self.rhs(self.t, y, param) ).reshape((batch_dim,-1)).pow(2).sum(dim=1).mean()
+# 					if residual[0]>self.tol:
+# 						residual[0].backward()
+# 					return residual[0]
+# 				nsolver.step(closure)
+
+# 				# assert residual[0]<1.e-2, 'Error: divergence at t=%d, residual is %.2E'%(self.t, residual[0].detach().numpy())
+# 				if residual[0]>self.tol:
+# 					print('Warning: convergence not achieved at t=%d, residual is %.2E'%(self.t, residual[0].detach().numpy()))
+
+# 				# TODO: what if some parameters need to have requires_grad=False?
+# 				self.rhs.requires_grad_(True)		# unfreeze parameters
+# 				self.rhs.train(mode=self.training)	# unfreeze spectral normalization
+
+# 			y = linsolve_backprop.apply(self, y, fp_map(y))
+# 		else:
+# 			y = x + self.h * self.rhs(self.t, x, param)
+
+
+# 		if _collect_stat:
+# 			mode = 'train/' if self.training else 'val/'
+# 			#######################
+# 			self.forward_stat[mode+'steps']    = self.forward_stat.get(mode+'steps',0)    + 1
+# 			self.forward_stat[mode+'iters']    = self.forward_stat.get(mode+'iters',0)    + cg_iters[0]
+# 			#######################
+# 			# self.forward_stat[mode+'residual_in']  = self.forward_stat.get(mode+'residual_in',0)  + residual_fun(x).detach()
+# 			self.forward_stat[mode+'residual'] = self.forward_stat.get(mode+'residual',0) + residual[0] if isinstance(residual[0],int) else residual[0].detach()
+# 			#######################
+
+# 		# cg_iters  = [0]
+# 		# residual  = [0]
+# 		return y
 
 
 
@@ -495,93 +411,326 @@ class ode_step(Module):
 ##############################################################################################################
 
 
-class ode_solver(Module):
-	# def __init__(self, rhs, T, num_steps, theta=0.0, fp_iters=0, Lip=0.5, reg_iters=1, solver='cg', method='inner'):
-	def __init__(self, rhs, T, num_steps, theta=0.0, solver='cg', method='inner', tol=_TOL):
+# class ode_solver(Module):
+# 	# def __init__(self, rhs, T, num_steps, theta=0.0, fp_iters=0, Lip=0.5, reg_iters=1, solver='cg', method='inner'):
+# 	def __init__(self, rhs, T, num_steps, theta=0.0, solver='cg', method='inner', tol=_TOL):
+# 		super().__init__()
+
+# 		# ODE count in a network as a class property
+# 		self.__class__.ode_count = getattr(self.__class__,'ode_count',-1) + 1
+# 		self.name = str(self.__class__.ode_count)+".ode"
+
+# 		self.rhs = rhs # need this to register parameters
+# 		if solver=='fp':
+# 			self.ode_step = torch.nn.ModuleList([fp_step(rhs, step, theta=theta, h=T/num_steps) for step in range(num_steps)])
+# 		elif solver=='cg':
+# 			self.ode_step = torch.nn.ModuleList([ode_step(rhs, step, theta=theta, h=T/num_steps, method=method, tol=tol) for step in range(num_steps)])
+
+# 		self.register_buffer('_theta', torch.tensor(theta))
+# 		self._num_steps = num_steps
+# 		self._T         = T
+
+
+# 	########################################
+
+# 	@property
+# 	def num_steps(self):
+# 		return self._num_steps
+# 	@num_steps.setter
+# 	def num_steps(self, num_steps):
+# 		self._num_steps = num_steps
+# 		for step in self.ode_step:
+# 			step.h = self.T / num_steps
+
+# 	@property
+# 	def T(self):
+# 		return self._T
+# 	@T.setter
+# 	def T(self, T):
+# 		self._T = T
+# 		for step in self.ode_step:
+# 			step.h = T / self.num_steps
+
+# 	@property
+# 	def theta(self):
+# 		return self._theta
+# 	@theta.setter
+# 	def theta(self, theta):
+# 		self._theta.fill_(theta)
+# 		for step in self.ode_step:
+# 			step.theta = theta
+
+# 	########################################
+
+# 	@property
+# 	def statistics(self, reset=True):
+# 		stat = {}
+# 		for step in range(self.num_steps):
+# 			train_steps = self.ode_step[step].forward_stat.pop('train/steps',0)
+# 			val_steps   = self.ode_step[step].forward_stat.pop('val/steps',0)
+# 			for key, value in self.ode_step[step].forward_stat.items():
+# 				new_key = ('forward_stat_'+key).replace('/', '/'+self.name+'_')
+# 				if 'train' in key:
+# 					stat[new_key] = stat.get(new_key,0) + value / train_steps / self.num_steps # / (self.num_steps if 'residual' in key else 1)
+# 				if 'val' in key:
+# 					stat[new_key] = stat.get(new_key,0) + value / val_steps / self.num_steps
+
+# 			back_steps = self.ode_step[step].backward_stat.pop('steps',0)
+# 			for key, value in self.ode_step[step].backward_stat.items():
+# 				new_key = 'backward_stat/'+self.name+'_'+key
+# 				stat[new_key] = stat.get(new_key,0) + value / back_steps / self.num_steps
+
+# 			if reset:
+# 				self.ode_step[step].forward_stat  = {}
+# 				self.ode_step[step].backward_stat = {}
+# 		stat['hparams/theta'] = self.theta
+# 		return stat
+
+# 	########################################
+
+# 	def residual(self, step, xy, fval=[None,None], param=None):
+# 		return self.ode_step[step].residual(xy, fval, param)
+
+# 	# TODO: replace with generator
+# 	def forward(self, y0, param=None):
+# 		y = [y0]
+# 		for step in range(self.num_steps):
+# 			y.append(self.ode_step[step](y[-1], param))
+# 		return torch.stack(y)
+
+
+
+class ode_solver(Module, metaclass=ABCMeta):
+	def __init__(self, rhs, T, num_steps):
 		super().__init__()
 
 		# ODE count in a network as a class property
 		self.__class__.ode_count = getattr(self.__class__,'ode_count',-1) + 1
 		self.name = str(self.__class__.ode_count)+".ode"
 
-		self.rhs = rhs # need this to register parameters
-		if solver=='fp':
-			self.ode_step = torch.nn.ModuleList([fp_step(rhs, step, theta=theta, h=T/num_steps) for step in range(num_steps)])
-		elif solver=='cg':
-			self.ode_step = torch.nn.ModuleList([ode_step(rhs, step, theta=theta, h=T/num_steps, method=method, tol=tol) for step in range(num_steps)])
+		self.rhs = rhs # this is registered as a submodule
+		self.register_buffer('_T', torch.tensor(T))
+		self.register_buffer('_num_steps', torch.tensor(num_steps))
+		self.register_buffer('_h', torch.tensor(T/num_steps))
 
-		self.register_buffer('_theta', torch.tensor(theta))
-		self._num_steps = num_steps
-		self._T         = T
-
+		self._stat = {}
 
 	########################################
 
 	@property
 	def num_steps(self):
-		return self._num_steps
+		return self._num_steps.item()
 	@num_steps.setter
 	def num_steps(self, num_steps):
-		self._num_steps = num_steps
-		for step in self.ode_step:
-			step.h = self.T / num_steps
+		self._num_steps.fill_(num_steps)
+		self._h = self.T / num_steps
 
 	@property
 	def T(self):
-		return self._T
+		return self._T.item()
 	@T.setter
 	def T(self, T):
-		self._T = T
-		for step in self.ode_step:
-			step.h = T / self.num_steps
+		self._T.fill_(T)
+		self._h = T / self.num_steps
 
 	@property
-	def theta(self):
-		return self._theta
-	@theta.setter
-	def theta(self, theta):
-		self._theta.fill_(theta)
-		for step in self.ode_step:
-			step.theta = theta
+	def h(self):
+		return self._h.item()
 
 	########################################
 
 	@property
 	def statistics(self, reset=True):
-		stat = {}
+		with torch.no_grad():
+			stat = {}
+
+			# get number of training/validation propagations and remove it from dict
+			train_steps = self._stat.pop('forward_train/steps',0)
+			valid_steps = self._stat.pop('forward_valid/steps',0)
+			backw_steps = self._stat.pop('backward/steps',0)
+
+			for key, value in self._stat.items():
+				mode, stat_name = key.split('/')
+				new_key = 'stat_'+mode+'/'+self.name+'_'+stat_name
+				if mode=='forward_train':
+					stat[new_key] = value / train_steps
+				elif mode=='forward_valid':
+					stat[new_key] = value / valid_steps
+				elif mode=='backward':
+					stat[new_key] = value / backw_steps
+				# stat[new_key] = value / (valid_steps if mode=='forward_valid' else train_steps)
+
+			if reset: self._stat = {}
+		return stat
+
+	########################################
+
+	@abstractmethod
+	def residual(self, xy, fval=[None,None], param=None):
+		pass
+
+	@abstractmethod
+	def ode_step(self, t0, x, param=None):
+		pass
+
+	def nsolve(self, fun, y, tol):
+		iters = [0]
+		resid = [0]
+
+		# if _forward_scipy: # use SciPy solver
+
+		# 	def functional(z):
+		# 		z0   = torch.from_numpy(z).view_as(x).to(device=y.device,dtype=y.dtype).requires_grad_(True)
+		# 		fun  = residual_fun(z0)
+		# 		print(fun)
+		# 		dfun = torch.autograd.grad(fun, z0)[0] # no retain_graph because derivative through nonlinearity is different at each iteration
+		# 		return fun.cpu().detach().numpy().astype(np.double), dfun.cpu().detach().numpy().ravel().astype(np.double)
+		# 	# opt_res = opt.minimize(functional, x.cpu().detach().numpy(), method='CG', jac=True, tol=_TOL, options={'maxiter': _max_iters,'disp': False})
+		# 	opt_res = opt.minimize(functional, y.cpu().detach().numpy(), method='L-BFGS-B', jac=True, tol=_TOL, options={'maxiter': _max_iters,'disp': False})
+
+		# 	y = torch.from_numpy(opt_res.x).view_as(x).to(device=y.device,dtype=y.dtype)
+		# 	residual[0] = torch.tensor(opt_res.fun).to(device=y.device,dtype=y.dtype)
+		# 	cg_iters[0], success = opt_res.nit, opt_res.success
+
+		# 	# assert success, "CG solver hasn't converged with residual "+str(r.detach().numpy())+" at iteration "+str(cg_iters)+" out of "+str(_max_iters)+" max iterations"
+		# 	# assert r<=1.e-3, "CG solver hasn't converged with residual "+str(r.detach().numpy())+" after "+str(cg_iters)+" iterations"
+
+		# 	if self.training:
+		# 		y_fp = fixed_point_map(y.requires_grad_(True)) # required_grad_(True) to compute Jacobian in linsolve_backprop
+		# 		y    = linsolve_backprop.apply(self, y, y_fp)
+
+		# 	# print(residual[0])
+		# 	# print('-------------')
+		# 	# exit()
+
+
+		# assert False, "torch.enable_grad is required here"
+
+
+		# check initial residual and, as a side effect, perform spectral normalization
+		init_resid = fun(y)
+		if init_resid<tol:
+			return y.detach(), {'iters': 0, 'residual': init_resid.detach()}
+
+		# self.rhs.eval()					# freeze spectral normalization
+		self.rhs.requires_grad_(False)	# freeze parameters
+
+		# NOTE: in torch.optim.LBFGS, all norms are max norms hence no need to account for batch size in tolerance_grad & tolerance_change
+		nsolver = torch.optim.LBFGS([y], lr=1, max_iter=_max_iters, max_eval=None, tolerance_grad=1.e-9, tolerance_change=1.e-9, history_size=10, line_search_fn='strong_wolfe')
+		def closure():
+			iters[0] += 1
+			nsolver.zero_grad()
+			resid[0] = fun(y)
+			if resid[0]>tol: resid[0].backward()
+			# if resid[0]>tol**2: resid[0].backward()
+			# resid[0] = torch.sqrt(resid[0])
+			return resid[0]
+		nsolver.step(closure)
+
+		# TODO: what if some parameters need to have requires_grad=False?
+		self.rhs.requires_grad_(self.training)		# unfreeze parameters
+		# self.rhs.requires_grad_(True)		# unfreeze parameters
+		# self.rhs.train(mode=self.training)	# unfreeze spectral normalization
+
+		return y.detach().requires_grad_(True), {'iters': iters[0], 'residual': resid[0].detach()}
+
+	########################################
+
+	# TODO: replace with generator
+	def forward(self, y0, t0=0, param=None):
+		y = [y0]
 		for step in range(self.num_steps):
-			train_steps = self.ode_step[step].forward_stat.pop('train/steps',0)
-			val_steps   = self.ode_step[step].forward_stat.pop('val/steps',0)
-			for key, value in self.ode_step[step].forward_stat.items():
-				new_key = ('forward_stat_'+key).replace('/', '/'+self.name+'_')
-				if 'train' in key:
-					stat[new_key] = stat.get(new_key,0) + value / train_steps / self.num_steps # / (self.num_steps if 'residual' in key else 1)
-				if 'val' in key:
-					stat[new_key] = stat.get(new_key,0) + value / val_steps / self.num_steps
+			t = t0 + step * self.h
+			y.append(self.ode_step(t, y[-1], param))
+		return torch.stack(y)
 
-			back_steps = self.ode_step[step].backward_stat.pop('steps',0)
-			for key, value in self.ode_step[step].backward_stat.items():
-				new_key = 'backward_stat/'+self.name+'_'+key
-				stat[new_key] = stat.get(new_key,0) + value / back_steps / self.num_steps
 
-			if reset:
-				self.ode_step[step].forward_stat  = {}
-				self.ode_step[step].backward_stat = {}
+###############################################################################################
+
+
+class theta_solver(ode_solver):
+	def __init__(self, rhs, T, num_steps, theta=0.0, tol=_TOL):
+		super().__init__(rhs, T, num_steps)
+
+		self.register_buffer('_theta', torch.tensor(theta))
+		self.tol = tol
+
+	########################################
+
+	@property
+	def theta(self):
+		return self._theta.item()
+	@theta.setter
+	def theta(self, theta):
+		self._theta.fill_(theta)
+
+	########################################
+
+	@property
+	def statistics(self, reset=True):
+		stat = super().statistics
 		stat['hparams/theta'] = self.theta
 		return stat
 
 	########################################
 
-	def residual(self, step, xy, fval=[None,None], param=None):
-		return self.ode_step[step].residual(xy, fval, param)
 
-	# TODO: replace with generator
-	def forward(self, y0, param=None):
-		y = [y0]
-		for step in range(self.num_steps):
-			y.append(self.ode_step[step](y[-1], param))
-		return torch.stack(y)
+	# def linsolve(self, dy, tol):
 
+
+	def step_fun(self, t, x, y=None):
+		# if theta==1, use left endpoint
+		t = (t + self.theta * self.h) if self.theta<1 else t
+		z = ((1-self.theta)*x if self.theta<1 else 0) + (self.theta*y if self.theta>0 else 0)
+		return self.h * self.rhs(t, z)
+
+
+	def residual(self, t, xval, fval=None, param=None):
+		x, y = xval
+		batch_dim = x.size(0)
+		return ( y - x - self.step_fun(t,x,y) ).pow(2).sum() / batch_dim
+
+
+	def ode_step(self, t, x, param=None):
+		res = {'iters': 0, 'residual': 0}
+		batch_dim = x.size(0)
+
+		residual_fn = lambda z: self.residual(t, [x.detach(),z])
+
+		if self.theta>0:
+			# initial condition: make new (that's why clone) leaf (that's why detach) node which requires gradient
+			y = x.clone().detach().requires_grad_(True)
+
+			# residual of initial condition
+			init_resid = residual_fn(y).detach()
+
+			# spectral normalization has to be performed only once per forward pass
+			# It has been performed in nsolve, so freeze here
+			# self.rhs.eval()
+			if init_resid<self.tol:
+				res = {'iters': 0, 'residual': init_resid}
+			else:
+				y, res = self.nsolve( residual_fn, y, self.tol )
+
+			# assert residual[0]<1.e-2, 'Error: divergence at t=%d, residual is %.2E'%(self.t, residual[0].detach().numpy())
+			if res['residual']>self.tol:
+				print('Warning: convergence not achieved at t=%d, residual is %.2E'%(t, res['residual'].cpu().detach().numpy()))
+
+			y = linsolve_backprop.apply(self, y, x + self.step_fun(t, x, y))
+
+			# unfreeze spectral normalization
+			# self.rhs.train(mode=self.training)
+		else:
+			y = x + self.step_fun(t, x)
+
+
+		if _collect_stat:
+			mode = 'forward_train/' if self.training else 'forward_valid/'
+			#######################
+			self._stat[mode+'steps']    = self._stat.get(mode+'steps',0)    + 1
+			self._stat[mode+'iters']    = self._stat.get(mode+'iters',0)    + res['iters']
+			self._stat[mode+'residual'] = self._stat.get(mode+'residual',0) + res['residual']
+		return y
 
 
 
@@ -619,7 +768,7 @@ class MLP(Module):
 		sigma2 = choose_activation(final_activation) if final_activation is not None else sigma1
 
 		# linear layers
-		linear_inp =   torch.nn.Linear(in_dim, width,   bias=False)
+		linear_inp =   torch.nn.Linear(in_dim, width,   bias=True)
 		linear_hid = [ torch.nn.Linear(width,  width,   bias=True) for _ in range(depth) ]
 		linear_out =   torch.nn.Linear(width,  out_dim, bias=False)
 
@@ -749,16 +898,17 @@ class ParabolicPerceptron(Module):
 class HamiltonianPerceptron(Module):
 	def __init__(self, dim, width, activation='relu', power_iters=0):
 		super().__init__()
-		assert dim%2==0, 'dim must be power of 2 for HamiltonianPerceptron'
+		assert dim%2==0,   'dim must be power of 2 for HamiltonianPerceptron'
+		assert width%2==0, 'width must be power of 2 for HamiltonianPerceptron'
 
 		# activation function
 		self.sigma = choose_activation(activation)
 
 		# parameters
-		self.weight1 = torch.nn.Parameter(torch.Tensor(width, dim//2))
-		self.weight2 = torch.nn.Parameter(torch.Tensor(width, dim//2))
-		self.bias1   = torch.nn.Parameter(torch.Tensor(width))
-		self.bias2   = torch.nn.Parameter(torch.Tensor(width))
+		self.weight1 = torch.nn.Parameter(torch.Tensor(width//2, dim//2))
+		self.weight2 = torch.nn.Parameter(torch.Tensor(width//2, dim//2))
+		self.bias1   = torch.nn.Parameter(torch.Tensor(width//2))
+		self.bias2   = torch.nn.Parameter(torch.Tensor(width//2))
 
 		# intialize weights
 		torch.nn.init.kaiming_uniform_(self.weight1, a=math.sqrt(5))
@@ -830,8 +980,19 @@ class PreActConv2d(Module):
 
 
 
+###############################################################################################
+###############################################################################################
 
 
+
+class diff_clamp(Function):
+	@staticmethod
+	def forward(ctx, x, min, max):
+		return torch.clamp(x, min, max)
+
+	@staticmethod
+	def backward(ctx, dy):
+		return dy.clone(), None, None
 
 
 
