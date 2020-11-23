@@ -1,10 +1,8 @@
-# import time
 import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-# import argparse
 from pathlib import Path
 
 import numpy as np
@@ -12,8 +10,6 @@ import matplotlib.pyplot as plt
 from mpl_toolkits import mplot3d
 
 import torch
-import torchvision
-from torch.utils.tensorboard import SummaryWriter
 
 import ex_setup
 import layers
@@ -25,7 +21,7 @@ if __name__ == '__main__':
 	#########################################################################################
 	#########################################################################################
 
-	args = ex_setup.make_parser().parse_args()
+	args = ex_setup.parse_args()
 
 	#########################################################################################
 	#########################################################################################
@@ -34,15 +30,12 @@ if __name__ == '__main__':
 	file_name   = ex_setup.make_name(args)
 	script_name = sys.argv[0][:-3]
 
-
 	#########################################################################################
 	#########################################################################################
 
 
-	gpu = torch.device('cuda')
-	cpu = torch.device('cpu')
-	_device = cpu #if torch.cuda.is_available() else cpu
-	_dtype  = torch.float
+	_device = ex_setup._cpu
+	_dtype  = ex_setup._dtype
 
 
 	#########################################################################################
@@ -52,16 +45,16 @@ if __name__ == '__main__':
 
 	fun  = (lambda x: np.sin(x) + 0.0*np.cos(19.0*x))
 	# initialization of codimensions
-	# phi  = lambda x: torch.cat( [x for _ in range(args.codim)], 1 )
 	phi  = lambda x: torch.zeros((x.size(0),args.codim))
+	# phi  = lambda x: torch.cat( [x for _ in range(args.codim)], 1 )
 	# phi  = lambda x: torch.from_numpy(fun(x.detach().numpy()))
 
 
 	# training data
 	ntrain = args.datasize
 	xtrain = np.linspace(-5, 5, ntrain).reshape((ntrain,1)) if ntrain>1 else np.array([[1]])
-	# xtrain = np.vstack( [np.linspace(-5, -1, ntrain//2).reshape((-1,1)), np.linspace(1, 5, ntrain//2).reshape((-1,1))] )
 	ytrain = fun(xtrain)
+	# xtrain = np.vstack( [np.linspace(-5, -1, ntrain//2).reshape((-1,1)), np.linspace(1, 5, ntrain//2).reshape((-1,1))] )
 	# xtrain = np.vstack([xtrain + 0.1*(2*np.random.rand(xtrain.shape[0],1)-1) for _ in range(5)])
 	# ytrain = np.vstack([ytrain for _ in range(5)])
 
@@ -78,15 +71,11 @@ if __name__ == '__main__':
 
 	#########################################################################################
 	#########################################################################################
-	# NN parameters
+	# Loss and scheduler
 
-	loss_fn         = torch.nn.MSELoss(reduction='mean')
-	optimizer_Adam  = lambda model, lr: torch.optim.Adam(model.parameters(),    lr=lr, weight_decay=args.wdecay)
-	optimizer_RMS   = lambda model, lr: torch.optim.RMSprop(model.parameters(), lr=lr, weight_decay=args.wdecay)
-	optimizer_SGD   = lambda model, lr: torch.optim.SGD(model.parameters(),     lr=lr, weight_decay=args.wdecay, momentum=0.5)
-	optimizer_LBFGS = lambda model, lr: torch.optim.LBFGS(model.parameters(),   lr=1., max_iter=100, max_eval=None, tolerance_grad=1.e-9, tolerance_change=1.e-9, history_size=100, line_search_fn='strong_wolfe')
-	scheduler_fn    = lambda optimizer: torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.7, patience=50, verbose=True, threshold=1.e-4, threshold_mode='rel', cooldown=50, min_lr=1.e-6, eps=1.e-8)
-	# scheduler_fn    = lambda optimizer: torch.optim.lr_scheduler.StepLR(optimizer, step_size=500, gamma=0.7, last_epoch=-1)
+	loss_fn      = torch.nn.MSELoss(reduction='mean')
+	scheduler_fn = lambda optimizer: torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.7, patience=50, verbose=True, threshold=1.e-4, threshold_mode='rel', cooldown=50, min_lr=1.e-6, eps=1.e-8)
+	# scheduler_fn = lambda optimizer: torch.optim.lr_scheduler.StepLR(optimizer, step_size=500, gamma=0.7, last_epoch=-1)
 
 
 	#########################################################################################
@@ -123,19 +112,18 @@ if __name__ == '__main__':
 	class ode_block(ex_setup.ode_block_base):
 		def __init__(self):
 			super().__init__(args)
-			self.ode = layers.ode_solver( ex_setup.rhs_mlp(1, args), args.T, args.T, args.theta, solver='cg', method=args.method, tol=args.tol )
+			self.ode = layers.theta_solver( ex_setup.rhs_mlp(1, args), args.T, args.steps, args.theta, tol=args.tol )
 	########################################################
 
 
 	########################################################
 	class model(torch.nn.Module):
 		def __init__(self):
-			super(model, self).__init__()
+			super().__init__()
 			self.net = torch.nn.Sequential( augment(), ode_block(), output() )
 
 		def forward(self, x):
-			out = self.net(x.requires_grad_(True))
-			return out
+			return self.net(x.requires_grad_(True))
 	########################################################
 
 
@@ -149,61 +137,65 @@ if __name__ == '__main__':
 
 
 	#########################################################################################
-	torch.autograd.set_detect_anomaly(True)
+	# uncommenting this will lead to the increased cost and memory leaking
+	# torch.autograd.set_detect_anomaly(True)
 
 
-	subdir = ("init" if args.prefix is None else "init_"+args.prefix) if args.mode=="init" else ( "mlp" if args.prefix is None else args.prefix )
+	# if args.mode=="init":
+	# 	# create directories for the checkpoints and logs
+	# 	chkp_dir = "initialization"
+	# 	logdir = Path("logs","init__"+file_name)
+	# 	Path(chkp_dir).mkdir(parents=True, exist_ok=True)
+	# 	writer = SummaryWriter(logdir)
 
-	if args.mode=="init":
-		# create directories for the checkpoints and logs
-		chkp_dir = "initialization"
-		logdir = Path("logs","init__"+file_name)
-		Path(chkp_dir).mkdir(parents=True, exist_ok=True)
-		writer = SummaryWriter(logdir)
+	# 	model       = get_model(args.seed)
+	# 	optimizer   = optimizer_SGD(model, args.lr)
+	# 	scheduler   = None
+	# 	regularizer = None
 
-		model       = get_model(args.seed)
-		optimizer   = optimizer_SGD(model, args.lr)
-		scheduler   = None
-		regularizer = None
+	# 	train_obj = utils.training_loop(model, dataset, val_dataset, args.batch, optimizer=optimizer, scheduler=scheduler, loss_fn=loss_fn, regularizer=regularizer,
+	# 				writer=writer, write_hist=True, history=False, checkpoint=None)
 
-		train_obj = utils.training_loop(model, dataset, val_dataset, args.batch, optimizer=optimizer, scheduler=scheduler, loss_fn=loss_fn, regularizer=regularizer,
-					writer=writer, write_hist=True, history=False, checkpoint=None)
+	# 	# initialize with analytic continuation
+	# 	for theta in np.linspace(0,1,101):
+	# 		model.apply(lambda m: setattr(m,'theta',theta))
+	# 		train_obj(10)
+	# 		torch.save( model.state_dict(), Path(chkp_dir,"%4.2f"%(theta)) )
 
-		# initialize with analytic continuation
-		for theta in np.linspace(0,1,101):
-			model.apply(lambda m: setattr(m,'theta',theta))
-			train_obj(10)
-			torch.save( model.state_dict(), Path(chkp_dir,"%4.2f"%(theta)) )
+	# 	writer.close()
 
-		writer.close()
 
-	elif args.mode=="train":
-		logdir = Path("logs",subdir,file_name)
-		writer = SummaryWriter(logdir) if args.epochs>0 else None
+	checkpoint_dir_init, checkpoint_dir, out_dir, writer = ex_setup.create_paths(args, file_name)
 
-		Path("checkpoints",subdir).mkdir(parents=True, exist_ok=True)
-
-		# logdir = Path("logs",'mlp',file_name) if args.prefix is None else Path("logs",args.prefix,file_name)
-		# writer = SummaryWriter(logdir) if args.epochs>0 else None
-
+	if args.mode!="plot":
 		losses = []
 		for sim in range(1):
 			try:
-				model       = get_model(args.seed+sim)
-				optimizer   = optimizer_Adam(model, args.lr)
-				scheduler   = scheduler_fn(optimizer)
-				regularizer = None
+				model     = get_model(args.seed+sim)
+				optimizer = ex_setup.get_optimizer('adam', model, args.lr, wdecay=0)
+				scheduler = scheduler_fn(optimizer)
 
 				# lr_schedule = np.linspace(args.lr, args.lr/100, args.epochs)
 				# checkpoint={'epochs':1000, 'name':"models/"+script_name+"/sim_"+str(sim)+'_'+file_name[:]}
-				train_obj = utils.training_loop(model, dataset, val_dataset, args.batch, optimizer=optimizer, scheduler=scheduler, loss_fn=loss_fn, regularizer=regularizer,
+				train_obj = utils.training_loop(model, dataset, val_dataset, args.batch, optimizer=optimizer, scheduler=scheduler, loss_fn=loss_fn,
 					writer=writer, write_hist=True, history=False, checkpoint=None)
 
+				torch.save( model.state_dict(), checkpoint_dir_init )
 				losses.append(train_obj(args.epochs))
+
+				# if args.mode=="train":
+				# 	torch.save( model.state_dict(), checkpoint_dir_init )
+				# 	losses.append(train_obj(args.epochs))
+				# elif args.mode=='init':
+				# 	# initialize with analytic continuation
+				# 	for theta in np.linspace(0,1,101):
+				# 		model.apply(lambda m: setattr(m,'theta',theta))
+				# 		train_obj(10)
+				# 		torch.save( model.state_dict(), Path("checkpoints","init_"+args.prefix,"%4.2f"%(theta)) )
 			except:
 				raise
 			finally:
-				torch.save( model.state_dict(), Path("checkpoints",subdir,file_name[:]) )
+				torch.save( model.state_dict(), checkpoint_dir )
 
 		if writer is not None:
 			writer.close()
@@ -212,14 +204,13 @@ if __name__ == '__main__':
 		fig_no = 0
 
 
-		Path("out",subdir).mkdir(parents=True, exist_ok=True)
-		data_name = ("out/%s/th%4.2f_T%d_data%d_adiv%4.2f"%(subdir, args.theta, args.T, args.datasize, args.adiv)).replace('.','')
+		data_name = ("%s/th%4.2f_T%d_data%d_adiv%4.2f"%(out_dir, args.theta, args.T, args.datasize, args.adiv)).replace('.','')
 
 
 		###############################################
 		# load model
 		model = get_model(args.seed)
-		missing_keys, unexpected_keys = model.load_state_dict(torch.load(Path("checkpoints",subdir,file_name), map_location=cpu))
+		missing_keys, unexpected_keys = model.load_state_dict(torch.load(checkpoint_dir, map_location=ex_setup._cpu))
 		model.eval()
 
 
@@ -474,6 +465,8 @@ if __name__ == '__main__':
 		plt.plot(ytest1[-1,:,0],  ytest1[-1,:,1],  '-r', linewidth=2.5)
 		plt.plot(ytrain1[0,:,0],  ytrain1[0,:,1],  '.b', markersize=8)
 		plt.plot(ytrain1[-1,:,0], ytrain1[-1,:,1], '.r', markersize=8)
+		plt.xlim(-7,7)
+		plt.ylim(-2,2)
 		# plt.plot(ytrain11[-1,:,0], ytrain11[-1,:,1], '.g', markersize=4)
 		plt.gca().axes.xaxis.set_visible(False)
 		plt.gca().axes.yaxis.set_visible(False)

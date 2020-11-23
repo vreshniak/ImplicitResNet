@@ -3,12 +3,11 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+from pathlib import Path
+import numpy as np
 import ex_setup
 
 from tensorboard.backend.event_processing import event_accumulator
-
-import numpy as np
-import matplotlib.pyplot as plt
 
 
 # https://stackoverflow.com/questions/52756152/tensorboard-extract-scalar-by-a-script
@@ -32,13 +31,15 @@ def _load_run(path):
 scalars = { '_div': 'rhs/0.ode_div',
 			'_jac': 'rhs/0.ode_jac',
 			'_loss': 'loss/0_train',
-			'_iters': 'forward_stat_train/0.ode_iters',
-			'_resid': 'forward_stat_train/0.ode_residual'
+			'_iters': 'stat_forward_train/0.ode_iters',
+			'_resid': 'stat_forward_train/0.ode_residual'
 		}
 
 
 logdir  = "./logs/mlp"
-savedir = "/Users/vv2/Dropbox (ORNL)/papers_talks/Implicit_networks/data/ex_1/mlp/"
+savedir = "./out/data/ex_1/mlp/"
+Path(savedir).mkdir(parents=True, exist_ok=True)
+
 
 num_points = 50
 for run in os.listdir(logdir):
@@ -55,7 +56,7 @@ for run in os.listdir(logdir):
 for adiv in [0.0,0.25,0.5,0.75,1.0]:
 	iters_vs_theta = []
 	for theta in [0.0,0.25,0.5,0.75,1.0]:
-		dataname = "theta%s_T5_data10_adiv%s"%( str(theta).replace('.',''), str(adiv).replace('.','') )
+		dataname = "theta%s_T5_data%d_adiv%s"%( str(theta).replace('.',''), args['datasize'], str(adiv).replace('.','') )
 		data = np.loadtxt(savedir+dataname+"_iters.csv", delimiter=',', skiprows=1)
 		iters_vs_theta = iters_vs_theta + [theta, data[-1,1]]
 	np.savetxt(savedir+"iters_vs_theta_adiv%s.csv"%(str(adiv).replace('.','')), np.array(iters_vs_theta).reshape((-1,2)), delimiter=',', header='Step, Value', comments='')
@@ -63,7 +64,7 @@ for adiv in [0.0,0.25,0.5,0.75,1.0]:
 for theta in [0.0,0.25,0.5,0.75,1.0]:
 	iters_vs_adiv = []
 	for adiv in [0.0,0.25,0.5,0.75,1.0]:
-		dataname = "theta%s_T5_data10_adiv%s"%( str(theta).replace('.',''), str(adiv).replace('.','') )
+		dataname = "theta%s_T5_data%d_adiv%s"%( str(theta).replace('.',''), args['datasize'], str(adiv).replace('.','') )
 		data = np.loadtxt(savedir+dataname+"_iters.csv", delimiter=',', skiprows=1)
 		iters_vs_adiv = iters_vs_adiv + [adiv, data[-1,1]]
 	np.savetxt(savedir+"iters_vs_adiv_theta%s.csv"%(str(theta).replace('.','')), np.array(iters_vs_adiv).reshape((-1,2)), delimiter=',', header='Step, Value', comments='')
