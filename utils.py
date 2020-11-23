@@ -161,9 +161,16 @@ def train(model,optimizer,num_epochs,dataset,val_dataset,batch_size,loss_fn,accu
 				reg_loss_sum = 0
 				acc_sum      = 0
 				# compute losses for each model
-				x, y = sample[0].to(device), sample[1].to(device)
+				# x, y = sample[0].to(device), sample[1].to(device)
+				x = [ sample[i].to(device) for i in range(len(sample)-1) ]
+				y = sample[len(sample)-1].to(device)
 				for key, MODEL in model.items():
-					y_pred    = MODEL(x)
+					# y_pred    = MODEL(x)
+					y_pred    = MODEL(*x)
+					if y.shape!=y_pred.shape:
+						print("Warning: "+str(y.shape)+" not equal to "+str(y_pred.shape))
+					# if not isinstance(loss_fn, torch.nn.CrossEntropyLoss):
+					# 	assert y.shape==y_pred.shape, str(y.shape)+" not equal to "+str(y_pred.shape)
 					loss[key] = loss_fn( y_pred, y )
 					loss_sum  = loss_sum + loss[key]
 					if accuracy_fn is not None:
@@ -213,105 +220,108 @@ def train(model,optimizer,num_epochs,dataset,val_dataset,batch_size,loss_fn,accu
 					torch.save(mod.state_dict(), Path(checkpoint['name']+'_chp_'+str(epoch+epoch0)))
 				print("checkpoint at epoch "+str(epoch+epoch0))
 
+		with torch.no_grad():
+			###########################################################
+			# lerning rate schedule
 
-		###########################################################
-		# lerning rate schedule
+			if scheduler is not None and lr_schedule is None:
+				if type(scheduler)==torch.optim.lr_scheduler.ReduceLROnPlateau:
+					scheduler.step(loss_sum)
+				else:
+					scheduler.step()
 
-		if scheduler is not None and lr_schedule is None:
-			if type(scheduler)==torch.optim.lr_scheduler.ReduceLROnPlateau:
-				scheduler.step(loss_sum)
-			else:
-				scheduler.step()
+			if lr_schedule is not None:
+				for param_group in optimizer.param_groups:
+					param_group['lr'] = lr_schedule[epoch]
 
-		if lr_schedule is not None:
-			for param_group in optimizer.param_groups:
-				param_group['lr'] = lr_schedule[epoch]
+			sec += (time.time() - start)
 
-		sec += (time.time() - start)
+			###########################################################
+			# write training stat
 
-		###########################################################
-		# write training stat
-
-		if epoch%stat_freq==0 or epoch==num_epochs-1:
-			if writer is not None:
-
-				# hyperparameters
-				for idx, param_group in enumerate(optimizer.param_groups):
-					writer.add_scalar('hparams/lr_'+str(idx), param_group['lr'], epoch+epoch0)
-
-				# model evaluation stat
-				for mkey, MODEL in model.items():
-					for name, MODULE in MODEL.named_modules():
-						for key, value in getattr(MODULE,'statistics',{}).items():
-							writer.add_scalar(key, value, epoch+epoch0)
-							# writer.add_scalar(key.replace('/','/'+mkey+'_'+name+'_'), value, epoch+epoch0)
-							# writer.add_scalar(mkey+'_'+key, value, epoch+epoch0)
-
-				# loss and accuracy
-				for key, LOSS in epoch_loss.items():
-					writer.add_scalar('loss/'+key+'_train', LOSS/(batch_ndx+1), epoch+epoch0)
-				# if regularizer is not None:
-				for key, REG_LOSS in epoch_reg_loss.items():
-					writer.add_scalar('loss/regularizer_'+str(key), REG_LOSS/(batch_ndx+1), epoch+epoch0)
-				if accuracy_fn is not None:
-					for key, ACC in epoch_acc.items():
-						writer.add_scalar('accuracy/'+key+'_train', ACC/(batch_ndx+1), epoch+epoch0)
-
-		#######################################################
-
-		# validation error/accuracy
-		for mod in model.values():
-			mod = mod.eval()
-
-		val_loss = {}
-		val_acc  = {}
-		if epoch%val_freq==0 or epoch==num_epochs-1:
-			val_loss_sum = 0
-			val_acc_sum  = 0
-			epoch_val_loss = {}
-			epoch_val_acc  = {}
-			for batch_ndx, sample in enumerate(val_dataloader):
-				val_x, val_y = sample[0].to(device), sample[1].to(device)
-				for key, MODEL in model.items():
-					val_y_pred   = MODEL(val_x)
-					val_loss     = loss_fn( val_y_pred, val_y )
-					val_loss_sum = val_loss_sum + val_loss
-					epoch_val_loss[key] = epoch_val_loss.get(key,0.0) + val_loss
-					if accuracy_fn is not None:
-						val_acc     = accuracy_fn( val_y_pred, val_y )
-						val_acc_sum = val_acc_sum + val_acc
-						epoch_val_acc[key] = epoch_val_acc.get(key,0.0) + val_acc
-				# break
-			if writer is not None:
-				for key, VAL_LOSS in epoch_val_loss.items():
-					writer.add_scalar('loss/'+key+'_validation', VAL_LOSS/(batch_ndx+1), epoch+epoch0)
-					if accuracy_fn is not None:
-						writer.add_scalar('accuracy/'+key+'_validation', epoch_val_acc[key]/(batch_ndx+1), epoch+epoch0)
-			if accuracy_fn is not None:
-				print("Epoch %d: %4.2f sec, loss %5.2e, val_loss %5.2e, acc %4.2f, val_acc %4.2f "%(epoch+epoch0, sec, loss_sum, val_loss_sum/(batch_ndx+1), acc_sum, val_acc_sum/(batch_ndx+1)))
-			else:
-				print("Epoch %d: %4.2f sec, loss %5.2e, val_loss %5.2e"%(epoch+epoch0, sec, loss_sum, val_loss_sum/(batch_ndx+1)))
-			if history:
-				loss_history[0,hist_i] = epoch+epoch0
-				loss_history[1,hist_i] = loss
-				loss_history[2,hist_i] = val_loss
-				hist_i += 1
-			sec = 0.0
-		if write_hist:
-			if epoch%hist_freq==0 or epoch==num_epochs-1:
+			if epoch%stat_freq==0 or epoch==num_epochs-1:
 				if writer is not None:
-					if isinstance(model, dict):
-						for key, value in model.items():
-							model0 = value
-							break
-					else:
-						model0 = model
-					# for name, weight in model0.named_parameters():
-					# 	if weight.grad is not None:
-					# 		writer.add_scalar('mean_param_value/'+name, weight.abs().mean(),      epoch+epoch0)
-					# 		writer.add_scalar('mean_param_grad/'+name,  weight.grad.abs().mean(), epoch+epoch0)
-					# 		writer.add_histogram('parameters/'+name,    weight,      epoch+epoch0, bins='tensorflow')
-					# 		writer.add_histogram('gradients/'+name,     weight.grad, epoch+epoch0, bins='tensorflow')
+
+					# hyperparameters
+					for idx, param_group in enumerate(optimizer.param_groups):
+						writer.add_scalar('hparams/lr_'+str(idx), param_group['lr'], epoch+epoch0)
+
+					# model evaluation stat
+					for mkey, MODEL in model.items():
+						for name, MODULE in MODEL.named_modules():
+							for key, value in getattr(MODULE,'statistics',{}).items():
+								writer.add_scalar(key, value, epoch+epoch0)
+								# writer.add_scalar(key.replace('/','/'+mkey+'_'+name+'_'), value, epoch+epoch0)
+								# writer.add_scalar(mkey+'_'+key, value, epoch+epoch0)
+
+					# loss and accuracy
+					for key, LOSS in epoch_loss.items():
+						writer.add_scalar('loss/'+key+'_train', LOSS/(batch_ndx+1), epoch+epoch0)
+					# if regularizer is not None:
+					for key, REG_LOSS in epoch_reg_loss.items():
+						writer.add_scalar('loss/regularizer_'+str(key), REG_LOSS/(batch_ndx+1), epoch+epoch0)
+					if accuracy_fn is not None:
+						for key, ACC in epoch_acc.items():
+							writer.add_scalar('accuracy/'+key+'_train', ACC/(batch_ndx+1), epoch+epoch0)
+
+			#######################################################
+
+			# validation error/accuracy
+			for mod in model.values():
+				mod = mod.eval()
+
+			val_loss = {}
+			val_acc  = {}
+			if epoch%val_freq==0 or epoch==num_epochs-1:
+				val_loss_sum = 0
+				val_acc_sum  = 0
+				epoch_val_loss = {}
+				epoch_val_acc  = {}
+				for batch_ndx, sample in enumerate(val_dataloader):
+					# val_x, val_y = sample[0].to(device), sample[1].to(device)
+					val_x = [ sample[i].to(device) for i in range(len(sample)-1) ]
+					val_y = sample[len(sample)-1].to(device)
+					for key, MODEL in model.items():
+						# val_y_pred   = MODEL(val_x)
+						val_y_pred   = MODEL(*val_x)
+						val_loss     = loss_fn( val_y_pred, val_y )
+						val_loss_sum = val_loss_sum + val_loss
+						epoch_val_loss[key] = epoch_val_loss.get(key,0.0) + val_loss
+						if accuracy_fn is not None:
+							val_acc     = accuracy_fn( val_y_pred, val_y )
+							val_acc_sum = val_acc_sum + val_acc
+							epoch_val_acc[key] = epoch_val_acc.get(key,0.0) + val_acc
+					# break
+				if writer is not None:
+					for key, VAL_LOSS in epoch_val_loss.items():
+						writer.add_scalar('loss/'+key+'_validation', VAL_LOSS/(batch_ndx+1), epoch+epoch0)
+						if accuracy_fn is not None:
+							writer.add_scalar('accuracy/'+key+'_validation', epoch_val_acc[key]/(batch_ndx+1), epoch+epoch0)
+				if accuracy_fn is not None:
+					print("Epoch %d: %4.2f sec, loss %5.2e, val_loss %5.2e, acc %4.2f, val_acc %4.2f "%(epoch+epoch0, sec, loss_sum, val_loss_sum/(batch_ndx+1), acc_sum, val_acc_sum/(batch_ndx+1)))
+				else:
+					print("Epoch %d: %4.2f sec, loss %5.2e, val_loss %5.2e"%(epoch+epoch0, sec, loss_sum, val_loss_sum/(batch_ndx+1)))
+				if history:
+					loss_history[0,hist_i] = epoch+epoch0
+					loss_history[1,hist_i] = loss
+					loss_history[2,hist_i] = val_loss
+					hist_i += 1
+				sec = 0.0
+			if write_hist:
+				if epoch%hist_freq==0 or epoch==num_epochs-1:
+					if writer is not None:
+						if isinstance(model, dict):
+							for key, value in model.items():
+								model0 = value
+								break
+						else:
+							model0 = model
+						# for name, weight in model0.named_parameters():
+						# 	if weight.grad is not None:
+						# 		writer.add_scalar('mean_param_value/'+name, weight.abs().mean(),      epoch+epoch0)
+						# 		writer.add_scalar('mean_param_grad/'+name,  weight.grad.abs().mean(), epoch+epoch0)
+						# 		writer.add_histogram('parameters/'+name,    weight,      epoch+epoch0, bins='tensorflow')
+						# 		writer.add_histogram('gradients/'+name,     weight.grad, epoch+epoch0, bins='tensorflow')
 	if history:
 		return loss_history
 
@@ -360,27 +370,34 @@ class TraceJacobianReg(torch.nn.Module):
 		'''
 		Compute trace and Frobenius norm of the Jacobian averaged over the batch dimension
 		'''
-		batch_dim = input.size(0)
+		with torch.enable_grad():
+			batch_dim = input.size(0)
 
-		input  = input.detach().requires_grad_(True)
-		output = fun(input)
+			input  = input.detach().requires_grad_(True)
+			output = fun(input)
 
-		div = jac = 0
-		if hasattr(fun, 'trace'):
-			div = fun.trace(input).sum() * self.n
+			div = jac = t = q = 0
+			if hasattr(fun, 'trace'):
+				div = fun.trace(input).sum() * self.n
 
-		# Randomized version based on Hutchinson algorithm for trace estimation
-		for _ in range(self.n):
-			v = torch.randn_like(output)
-			v_jac, = torch.autograd.grad(
-				outputs=output,
-				inputs=input,
-				grad_outputs=v,
-				create_graph=create_graph,  # need create_graph to find it's derivative
-				only_inputs=True)
-			if not hasattr(fun, 'trace'):
-				div = div + (v*v_jac).sum()
-			jac = jac + v_jac.pow(2).sum()
+			# Randomized version based on Hutchinson algorithm for trace estimation
+			for _ in range(self.n):
+				v = torch.randn_like(output)
+				v_jac, = torch.autograd.grad(
+					outputs=output,
+					inputs=input,
+					grad_outputs=v,
+					create_graph=create_graph,  # need create_graph to find it's derivative
+					only_inputs=True)
+				vjacv = v*v_jac
+				if not hasattr(fun, 'trace'):
+					div = div + vjacv.sum()
+				jac = jac + v_jac.pow(2).sum()
+				# t = t + vjacv
+				# q = q + v*v
+
+			# remove diagonal elements
+			# jac = (jac/self.n-(t/q).pow(2).sum())/batch_dim
 
 		return div/self.n/batch_dim, jac/self.n/batch_dim
 # class TraceJacobianReg(torch.nn.Module):
