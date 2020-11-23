@@ -9,9 +9,66 @@ from random import randint
 import numpy as np
 import math
 
+from pathlib import Path
+from torch.utils.tensorboard import SummaryWriter
+
 import torch
 import utils
 import layers
+
+
+
+
+###############################################################################
+###############################################################################
+
+
+_gpu   = torch.device('cuda')
+_cpu   = torch.device('cpu')
+_dtype = torch.float
+
+_collect_stat = False
+
+
+
+###############################################################################
+###############################################################################
+
+
+def get_optimizer(name, model, lr, wdecay=0):
+	if name=='adam':
+		return torch.optim.Adam(model.parameters(),    lr=lr, weight_decay=wdecay)
+	elif name=='rms':
+		return torch.optim.RMSprop(model.parameters(), lr=lr, weight_decay=wdecay)
+	elif name=='sgd':
+		return torch.optim.SGD(model.parameters(),     lr=lr, weight_decay=wdecay, momentum=0.5)
+	elif name=='lbfgs':
+		return torch.optim.LBFGS(model.parameters(),   lr=1., max_iter=100, max_eval=None, tolerance_grad=1.e-9, tolerance_change=1.e-9, history_size=100, line_search_fn='strong_wolfe')
+
+
+
+def create_paths(args, file_name):
+	subdir = "mlp" if args.prefix is None else args.prefix
+	# if args.mode=="init": subdir += "/init"
+
+	Path("checkpoints",subdir,"epoch0").mkdir(parents=True, exist_ok=True)
+	Path("checkpoints",subdir).mkdir(parents=True, exist_ok=True)
+	Path("out",subdir).mkdir(parents=True, exist_ok=True)
+	logdir = Path("logs",subdir,file_name)
+	writer = SummaryWriter(logdir) if args.epochs>0 else None
+
+	checkpoint_dir_0 = Path("checkpoints",subdir,'epoch0',file_name)
+	checkpoint_dir   = Path("checkpoints",subdir,file_name)
+	out_dir = Path("out",subdir)
+
+	return checkpoint_dir_0, checkpoint_dir, out_dir, writer
+
+
+
+###############################################################################
+###############################################################################
+
+
 
 
 def parse_args():
@@ -80,7 +137,8 @@ def option_type(option):
 				'method': str,
 				'theta': float,
 				'tol': float,
-				'T': int,
+				'T': float,
+				'steps': int,
 				'codim': int,
 				'width': int,
 				'depth': int,
@@ -98,10 +156,12 @@ def option_type(option):
 				'wdecay': float,
 				'aTV': float,
 				'adiv': float,
+				'ajdiag': float,
 				'ajac': float,
 				'atan': float,
 				'af': float,
 				'aresid': float,
+				'mciters': int
 				}
 	return opt2type[option]
 
@@ -150,8 +210,17 @@ def get_options_from_name(name):
 
 	opts = name.split(sep)
 	for opt in opts:
-		opt_name, opt_val = opt.split(opsep)
-		options[opt_name] = option_type(opt_name)(opt_val)
+		opts = opt.split(opsep)
+		if len(opts)==2:
+			opt_name, opt_val = opts
+			opt_val = option_type(opt_name)(opt_val)
+		else:
+			opt_name = opts[0]
+			opt_val  = [ option_type(opt_name)(op) for op in opts[1:] ]
+		options[opt_name] = opt_val
+		# print(opt_name)
+		# opt_name, opt_val = opt.split(opsep)
+		# options[opt_name] = option_type(opt_name)(opt_val)
 	return options
 
 
@@ -168,9 +237,12 @@ class rhs_base(torch.nn.Module, metaclass=ABCMeta):
 		super().__init__()
 		self.args = args
 
-		# divergence and Jacobian regularizer
+		# divergence and Jacobian regularizers
 		self.divjacreg  = utils.TraceJacobianReg(n=args.mciters)
 		self.jacdiagreg = utils.JacDiagReg(n=args.mciters, value=args.diaval)
+
+		###############################
+		# scales
 
 		# self.maxshift = 1./max(0.2,self.args.theta) if math.isnan(self.args.eigs[1]) else np.abs(self.args.eigs[1])
 		# self.maxrho   = 1.e2 if math.isnan(self.args.eigs[0]) else np.abs(self.args.eigs[0])
@@ -178,10 +250,30 @@ class rhs_base(torch.nn.Module, metaclass=ABCMeta):
 		# self.maxrho  *= 0.5
 		# self.maxrho  += self.maxshift
 
-		self.min_eig = -1./max(0.01,np.abs(self.args.theta-0.5)) if math.isnan(self.args.eigs[0]) else self.args.eigs[0]
-		self.max_eig =  1./max(0.01,self.args.theta)             if math.isnan(self.args.eigs[1]) else self.args.eigs[1]
-		assert self.max_eig>self.min_eig
-		self.max_rho = (self.max_eig - self.min_eig) / 2
+		min_eig = -1./max(0.01,np.abs(self.args.theta-0.5)) if math.isnan(self.args.eigs[0]) else self.args.eigs[0]
+		max_eig =  1./max(0.01,self.args.theta)             if math.isnan(self.args.eigs[1]) else self.args.eigs[1]
+		assert max_eig>min_eig
+		self.max_rho = (max_eig - min_eig) / 2
+
+		if args.scales=='learn' and args.piters>0:
+			if self.max_rho>0:
+				initrho = 0.1*self.max_rho
+				self._scales = torch.nn.parameter.Parameter( np.log(initrho/(self.max_rho-initrho)) * self.ones_like_input(), requires_grad=True)
+			else:
+				self.register_buffer('_scales', torch.tensor([0.0], dtype=torch.float))
+			self.register_buffer('_eigshift', torch.tensor([(min_eig+max_eig)/2], dtype=torch.float))
+		else:
+			self.register_buffer('_scales',   torch.tensor([1.0], dtype=torch.float))
+			self.register_buffer('_eigshift', torch.tensor([0.0], dtype=torch.float))
+		# elif args.scales=='equal':
+		# 	self._scales   = torch.tensor([1.0]) if math.isnan(self.args.eigs[0]) else torch.tensor([self.maxrho],   dtype=torch.float)
+		# 	self._eigshift = torch.tensor([0.0]) if math.isnan(self.args.eigs[1]) else torch.tensor([self.maxshift], dtype=torch.float)
+
+
+
+	@abstractmethod
+	def ones_like_input(self):
+		pass
 
 
 	def initialize(self):
@@ -194,6 +286,9 @@ class rhs_base(torch.nn.Module, metaclass=ABCMeta):
 				# torch.nn.init.uniform_(weight,-1.e-5,1.e-5)
 			else:
 				torch.nn.init.zeros_(weight)
+		# perform initial spectral normalization
+		if self.args.piters>0:
+			self.spectral_normalization(self.ones_like_input(), 10)
 
 
 	# divergence and jacobian of the vector field
@@ -291,75 +386,74 @@ class rhs_base(torch.nn.Module, metaclass=ABCMeta):
 
 class rhs_mlp(rhs_base):
 	def __init__(self, data_dim, args, final_activation=None):
+		# dimension of the state space
+		self.dim = data_dim+args.codim
 		super().__init__(args)
 
-		# sigmas = args.sigma.split('_')
-		if len(args.sigma)==1:
-			sigma = args.sigma[0]
-			final_activation = None
-		elif len(args.sigma)==2:
-			sigma, final_activation = args.sigma
-		# final_activation = args.sigma if final_activation is None else final_activation
+		# ###############################
+		# # scales of each dimension
+		# # if args.scales=='learn':
+		# # 	if self.maxrho>0:
+		# # 		# initrho = 1.0 if self.maxrho>1 else self.maxrho
+		# # 		# initrho = 0.1*self.maxrho
+		# # 		# self._scales = torch.nn.parameter.Parameter( np.log(initrho/(self.maxrho-initrho)) * torch.ones((1,dim), dtype=torch.float), requires_grad=True)
+		# # 	else:
+		# # 		self._scales = torch.tensor([0.0], dtype=torch.float)
 
-		# dimension of the state space
-		dim = data_dim+args.codim
-		self.dim = dim
-
-		###############################
-		# scales of each dimension
-		# if args.scales=='learn':
-		# 	if self.maxrho>0:
-		# 		# initrho = 1.0 if self.maxrho>1 else self.maxrho
-		# 		# initrho = 0.1*self.maxrho
-		# 		# self._scales = torch.nn.parameter.Parameter( np.log(initrho/(self.maxrho-initrho)) * torch.ones((1,dim), dtype=torch.float), requires_grad=True)
+		# # 	if self.maxshift>0:
+		# # 		# initshift = 0.5 if self.maxshift>1 else 0.5*self.maxshift
+		# # 		initshift = 0.1*self.maxshift
+		# # 		self._eigshift = torch.nn.parameter.Parameter( np.log(initshift/(self.maxshift-initshift)) * torch.ones((1,dim), dtype=torch.float), requires_grad=True)
+		# # 	else:
+		# # 		self._eigshift = torch.tensor([0.0], dtype=torch.float)
+		# # elif args.scales=='equal':
+		# # 	self._scales   = torch.tensor([1.0]) if math.isnan(self.args.eigs[0]) else torch.tensor([self.maxrho],   dtype=torch.float)
+		# # 	self._eigshift = torch.tensor([1.0]) if math.isnan(self.args.eigs[1]) else torch.tensor([self.maxshift], dtype=torch.float)
+		# if args.scales=='learn' and args.piters>0:
+		# 	if self.max_rho>0:
+		# 		initrho = 0.1*self.max_rho
+		# 		self._scales = torch.nn.parameter.Parameter( np.log(initrho/(self.max_rho-initrho)) * torch.ones((1,dim), dtype=torch.float), requires_grad=True)
 		# 	else:
 		# 		self._scales = torch.tensor([0.0], dtype=torch.float)
-
-		# 	if self.maxshift>0:
-		# 		# initshift = 0.5 if self.maxshift>1 else 0.5*self.maxshift
-		# 		initshift = 0.1*self.maxshift
-		# 		self._eigshift = torch.nn.parameter.Parameter( np.log(initshift/(self.maxshift-initshift)) * torch.ones((1,dim), dtype=torch.float), requires_grad=True)
-		# 	else:
-		# 		self._eigshift = torch.tensor([0.0], dtype=torch.float)
-		# elif args.scales=='equal':
-		# 	self._scales   = torch.tensor([1.0]) if math.isnan(self.args.eigs[0]) else torch.tensor([self.maxrho],   dtype=torch.float)
-		# 	self._eigshift = torch.tensor([1.0]) if math.isnan(self.args.eigs[1]) else torch.tensor([self.maxshift], dtype=torch.float)
-		if args.scales=='learn' and args.piters>0:
-			if self.max_rho>0:
-				initrho = 0.1*self.max_rho
-				self._scales = torch.nn.parameter.Parameter( np.log(initrho/(self.max_rho-initrho)) * torch.ones((1,dim), dtype=torch.float), requires_grad=True)
-			else:
-				self._scales = torch.tensor([0.0], dtype=torch.float)
-			self._eigshift = torch.tensor([(self.min_eig+self.max_eig)/2], dtype=torch.float)
-		else:
-			self._scales   = torch.tensor([1.0])
-			self._eigshift = torch.tensor([0.0])
-		# elif args.scales=='equal':
-		# 	self._scales   = torch.tensor([1.0]) if math.isnan(self.args.eigs[0]) else torch.tensor([self.maxrho],   dtype=torch.float)
-		# 	self._eigshift = torch.tensor([0.0]) if math.isnan(self.args.eigs[1]) else torch.tensor([self.maxshift], dtype=torch.float)
-
+		# 	self._eigshift = torch.tensor([(self.min_eig+self.max_eig)/2], dtype=torch.float)
+		# else:
+		# 	self._scales   = torch.tensor([1.0])
+		# 	self._eigshift = torch.tensor([0.0])
+		# # elif args.scales=='equal':
+		# # 	self._scales   = torch.tensor([1.0]) if math.isnan(self.args.eigs[0]) else torch.tensor([self.maxrho],   dtype=torch.float)
+		# # 	self._eigshift = torch.tensor([0.0]) if math.isnan(self.args.eigs[1]) else torch.tensor([self.maxshift], dtype=torch.float)
 
 		###############################
-		F_depth = args.steps if args.aTV>=0 else 1
+		# RHS function
 
-		# structured rhs
+		# activation
+		if len(args.sigma)==1:
+			sigma, final_activation = args.sigma[0], None
+		elif len(args.sigma)==2:
+			sigma, final_activation = args.sigma
+		else:
+			assert False, 'args.sigma should have either 1 or 2 entries'
+
+		# depth of rhs
+		rhs_depth = args.steps if args.aTV>=0 else 1
+
+		# structure of rhs
 		structure = args.prefix if args.prefix is not None else 'mlp'
 		if structure=='par':
-			self.rhs = torch.nn.ModuleList( [ layers.ParabolicPerceptron( dim=dim, width=args.width, activation=sigma, power_iters=args.piters) for _ in range(F_depth) ] )
+			self.rhs = torch.nn.ModuleList( [ layers.ParabolicPerceptron( dim=self.dim, width=args.width, activation=sigma, power_iters=args.piters) for _ in range(rhs_depth) ] )
 		elif structure=='ham':
-			self.rhs = torch.nn.ModuleList( [ layers.HamiltonianPerceptron( dim=dim, width=args.width, activation=sigma, power_iters=args.piters) for _ in range(F_depth) ] )
+			self.rhs = torch.nn.ModuleList( [ layers.HamiltonianPerceptron( dim=self.dim, width=args.width, activation=sigma, power_iters=args.piters) for _ in range(rhs_depth) ] )
 		elif structure=='hol':
-			self.rhs = torch.nn.ModuleList( [ layers.HollowMLP(dim=dim, width=args.width, depth=args.depth, activation=sigma, final_activation=final_activation, power_iters=args.piters) for _ in range(F_depth) ] )
+			self.rhs = torch.nn.ModuleList( [ layers.HollowMLP(dim=self.dim, width=args.width, depth=args.depth, activation=sigma, final_activation=final_activation, power_iters=args.piters) for _ in range(rhs_depth) ] )
 		elif structure=='mlp':
-			self.rhs = torch.nn.ModuleList( [ layers.MLP(in_dim=dim, out_dim=dim, width=args.width, depth=args.depth, activation=sigma, final_activation=final_activation, power_iters=args.piters) for _ in range(F_depth) ] )
+			self.rhs = torch.nn.ModuleList( [ layers.MLP(in_dim=self.dim, out_dim=self.dim, width=args.width, depth=args.depth, activation=sigma, final_activation=final_activation, power_iters=args.piters) for _ in range(rhs_depth) ] )
 
-
-		###############################
-		# intialization
+		# intialize rhs
 		self.initialize()
-		# perform initial spectral normalization
-		if args.piters>0:
-			self.spectral_normalization(torch.ones((1,dim)), 10)
+
+
+	def ones_like_input(self):
+		return torch.ones((1,self.dim), dtype=torch.float)
 
 
 
@@ -485,59 +579,59 @@ class ode_block_base(torch.nn.Module):
 
 	@property
 	def statistics(self):
-		# with torch.no_grad():
 		stat = {}
-		# rhs  = self.ode.rhs
-		# name = 'rhs/'+self.ode.name+'_'
-		# args = self.args
+		if _collect_stat:
+			rhs  = self.ode.rhs
+			name = 'rhs/'+self.ode.name+'_'
+			args = self.args
 
-		# # spectral normalization has to be performed only once per forward pass, so freeze here
-		# rhs.eval()
+			# spectral normalization has to be performed only once per forward pass, so freeze here
+			rhs.eval()
 
-		# # # trapezoidal rule
-		# # y0, yT = self.ode_out[0], self.ode_out[-1]
-		# # div0, jac0 = rhs.divjac(0,y0)
-		# # divT, jacT = rhs.divjac(args.T,yT)
-		# # stat[name+'div']   = 0.5 * ( div0 + divT)
-		# # stat[name+'jdiag'] = 0.5 * ( rhs.jacdiag(0,y0) + rhs.jacdiag(args.T,yT) )
-		# # stat[name+'jac']   = 0.5 * ( jac0 + jacT )
-		# # stat[name+'f']     = 0.5 * ( rhs(0,y0).pow(2).sum() + rhs(args.T,yT).pow(2).sum() )
-		# # for t in range(1,args.steps):
-		# # 	y = self.ode_out[t]
-		# # 	divt, jact = rhs.divjac(t,y)
-		# # 	stat[name+'div']   = stat[name+'div']   + divt
-		# # 	stat[name+'jdiag'] = stat[name+'jdiag'] + rhs.jacdiag(t,y)
-		# # 	stat[name+'jac']   = stat[name+'jac']   + jact
-		# # 	stat[name+'f']     = stat[name+'f']     + rhs(t,y).pow(2).sum()
+			# # trapezoidal rule
+			# y0, yT = self.ode_out[0], self.ode_out[-1]
+			# div0, jac0 = rhs.divjac(0,y0)
+			# divT, jacT = rhs.divjac(args.T,yT)
+			# stat[name+'div']   = 0.5 * ( div0 + divT)
+			# stat[name+'jdiag'] = 0.5 * ( rhs.jacdiag(0,y0) + rhs.jacdiag(args.T,yT) )
+			# stat[name+'jac']   = 0.5 * ( jac0 + jacT )
+			# stat[name+'f']     = 0.5 * ( rhs(0,y0).pow(2).sum() + rhs(args.T,yT).pow(2).sum() )
+			# for t in range(1,args.steps):
+			# 	y = self.ode_out[t]
+			# 	divt, jact = rhs.divjac(t,y)
+			# 	stat[name+'div']   = stat[name+'div']   + divt
+			# 	stat[name+'jdiag'] = stat[name+'jdiag'] + rhs.jacdiag(t,y)
+			# 	stat[name+'jac']   = stat[name+'jac']   + jact
+			# 	stat[name+'f']     = stat[name+'f']     + rhs(t,y).pow(2).sum()
 
-		# # dim = y0.numel() / y0.size(0)
-		# # stat[name+'f']     = stat[name+'f']     / args.steps / dim
-		# # stat[name+'jdiag'] = stat[name+'jdiag'] / args.steps / dim
-		# # stat[name+'jac']   = stat[name+'jac']   / args.steps / dim**2
-		# # stat[name+'div']   = stat[name+'div']   / args.steps / dim
-		# # trapezoidal rule
-		# y0, yT = self.ode_out[0].detach(), self.ode_out[-1].detach()
-		# div0, jac0 = rhs.divjac(0,y0)
-		# divT, jacT = rhs.divjac(args.T,yT)
-		# stat[name+'div']   = 0.5 * ( div0 + divT)
-		# # stat[name+'jdiag'] = 0.5 * ( rhs.jacdiag(0,y0) + rhs.jacdiag(args.T,yT) )
-		# stat[name+'jac']   = 0.5 * ( jac0 + jacT )
-		# stat[name+'f']     = 0.5 * ( rhs(0,y0).pow(2).sum() + rhs(args.T,yT).pow(2).sum() )
-		# for t in range(1,args.steps):
-		# 	y = self.ode_out[t].detach()
-		# 	divt, jact = rhs.divjac(t,y)
-		# 	stat[name+'div']   = stat[name+'div']   + divt
-		# 	# stat[name+'jdiag'] = stat[name+'jdiag'] + rhs.jacdiag(t,y)
-		# 	stat[name+'jac']   = stat[name+'jac']   + jact
-		# 	stat[name+'f']     = stat[name+'f']     + rhs(t,y).pow(2).sum()
+			# dim = y0.numel() / y0.size(0)
+			# stat[name+'f']     = stat[name+'f']     / args.steps / dim
+			# stat[name+'jdiag'] = stat[name+'jdiag'] / args.steps / dim
+			# stat[name+'jac']   = stat[name+'jac']   / args.steps / dim**2
+			# stat[name+'div']   = stat[name+'div']   / args.steps / dim
+			# trapezoidal rule
+			y0, yT = self.ode_out[0].detach(), self.ode_out[-1].detach()
+			div0, jac0 = rhs.divjac(0,y0)
+			divT, jacT = rhs.divjac(args.T,yT)
+			stat[name+'div']   = 0.5 * ( div0 + divT)
+			# stat[name+'jdiag'] = 0.5 * ( rhs.jacdiag(0,y0) + rhs.jacdiag(args.T,yT) )
+			stat[name+'jac']   = 0.5 * ( jac0 + jacT )
+			stat[name+'f']     = 0.5 * ( rhs(0,y0).pow(2).sum() + rhs(args.T,yT).pow(2).sum() )
+			for t in range(1,args.steps):
+				y = self.ode_out[t].detach()
+				divt, jact = rhs.divjac(t,y)
+				stat[name+'div']   = stat[name+'div']   + divt
+				# stat[name+'jdiag'] = stat[name+'jdiag'] + rhs.jacdiag(t,y)
+				stat[name+'jac']   = stat[name+'jac']   + jact
+				stat[name+'f']     = stat[name+'f']     + rhs(t,y).pow(2).sum()
 
-		# dim = y0.numel() / y0.size(0)
-		# stat[name+'f']     = stat[name+'f'].detach()     / args.steps / dim
-		# # stat[name+'jdiag'] = stat[name+'jdiag'].detach() / args.steps / dim
-		# stat[name+'jac']   = stat[name+'jac'].detach()   / args.steps / dim**2
-		# stat[name+'div']   = stat[name+'div'].detach()   / args.steps / dim
+			dim = y0.numel() / y0.size(0)
+			stat[name+'f']     = stat[name+'f'].detach()     / args.steps / dim
+			# stat[name+'jdiag'] = stat[name+'jdiag'].detach() / args.steps / dim
+			stat[name+'jac']   = stat[name+'jac'].detach()   / args.steps / dim**2
+			stat[name+'div']   = stat[name+'div'].detach()   / args.steps / dim
 
-		# rhs.train(mode=self.training)
+			rhs.train(mode=self.training)
 
 		return stat
 
