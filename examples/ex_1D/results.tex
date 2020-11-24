@@ -1,6 +1,8 @@
 \documentclass{article}
 \usepackage[margin=1in]{geometry}
 
+\pagestyle{empty}
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \usepackage{amsmath, amssymb, amsfonts}
 \usepackage{bbm} % \mathbbm
@@ -28,7 +30,7 @@
 \usepackage{tikz}
 \usepackage{pgfplots}
 \usepackage{pgfplotstable}
-\pgfplotsset{table/search path={out/data}}
+\pgfplotsset{table/search path={output/data}}
 \pgfplotsset{compat=1.15}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \usepgfplotslibrary{statistics}
@@ -36,9 +38,9 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 
-\DeclareMathOperator*{\argmin}{arg\,min}
-\DeclareMathOperator{\Tr}{Tr}
-\graphicspath{ {./Definitions/} {./out/}}
+% \DeclareMathOperator*{\argmin}{arg\,min}
+% \DeclareMathOperator{\Tr}{Tr}
+\graphicspath{{./output/images/}}
 
 
 
@@ -154,7 +156,7 @@
 					very thick ]
 				\foreach \adiv in {00, 025, 05, 075, 10}
 					\foreach \th in {00, 025, 05, 075, 10}
-						\addplot  table[x=Step,y=Value,col sep=comma, y expr=\thisrowno{1}] {ex_1/mlp/theta\th_T5_data20_adiv\adiv_\qi.csv};
+						\addplot  table[x=Step,y=Value,col sep=comma, y expr=\thisrowno{1}] {theta\th_T5_data20_adiv\adiv_\qi.csv};
 			\end{axis}
 		\end{tikzpicture}
 	}
@@ -187,7 +189,7 @@
 				legend entries = {$\alpha_{div}=0.00$,$\alpha_{div}=0.25$,$\alpha_{div}=0.50$,$\alpha_{div}=0.75$,$\alpha_{div}=1.00$}
 			]
 			\foreach \adiv in {00, 025, 05, 075, 10}
-				\addplot+ [mark=o, mark options={solid}]table[x=Step,y=Value,col sep=comma] {\prefix/iters_vs_theta_adiv\adiv.csv};
+				\addplot+ [mark=o, mark options={solid}]table[x=Step,y=Value,col sep=comma] {iters_vs_theta_adiv\adiv.csv};
 		\end{axis}
 	\end{tikzpicture}
 	\quad
@@ -198,7 +200,7 @@
 				legend entries = {$\theta=0.00$,$\theta=0.25$,$\theta=0.50$,$\theta=0.75$,$\theta=1.00$}
 			]
 			\foreach \th in {00, 025, 05, 075, 10}
-				\addplot+ [mark=o, mark options={solid}] table[x=Step,y=Value,col sep=comma] {\prefix/iters_vs_adiv_theta\th.csv};
+				\addplot+ [mark=o, mark options={solid}] table[x=Step,y=Value,col sep=comma] {iters_vs_adiv_theta\th.csv};
 		\end{axis}
 	\end{tikzpicture}
 
@@ -217,7 +219,7 @@
 		{
 			\begin{tikzpicture}
 				\begin{axis}[width=0.35\textwidth, enlargelimits=false, axis on top, title={ \ifthenelse{\equal{\adiv}{000}}{$\theta=\ttl$}{} }, ylabel={  \ifthenelse{\equal{\th}{000}}{$\alpha_{div}=\ylbl$}{} }]
-					\addplot graphics [xmin=-7, xmax=7, ymin=-2, ymax=2] {mlp/th\th_T5_data20_adiv\adiv_traj.pdf};
+					\addplot graphics [xmin=-7, xmax=7, ymin=-2, ymax=2] {th\th_T5_data20_adiv\adiv_traj.pdf};
 				\end{axis}
 			\end{tikzpicture}
 		}\\
@@ -226,13 +228,13 @@
 			\begin{tikzpicture}
 %				\begin{axis}[width=0.37\textwidth, enlargelimits=false, axis on top, title={}, ylabel={  \ifthenelse{\equal{\th}{000}}{$\alpha_{div}=\ylbl$}{} }]
 				\begin{axis}[width=0.35\textwidth, enlargelimits=false, axis on top, title={}, ylabel={  \ifthenelse{\equal{\th}{000}}{ \phantom{$\alpha_{div}=\ylbl$} }{} }]
-					\addplot graphics [points={(-3,-3) (3,3)}, includegraphics={trim=0 0 0 0,clip}] {mlp/th\th_T5_data20_adiv\adiv_spectrum.pdf};
+					\addplot graphics [points={(-3,-3) (3,3)}, includegraphics={trim=0 0 0 0,clip}] {th\th_T5_data20_adiv\adiv_spectrum.pdf};
 				\end{axis}
 			\end{tikzpicture}
 		}\\
 	}
 
-    \caption{ (Top) Learned vector fields $F(\gamma,y)$ in Example 1. Blue line is the initial state, red curve is the final state after $T=5$ steps, solid black lines are the trajectories of the training data.
+    \caption{ (Top) Learned vector fields $F(\gamma,y)$. Blue line is the initial state, red curve is the final state after $T=5$ steps, solid black lines are the trajectories of the training data.
     (Bottom)~Eigenvalues of $\frac{\partial F(\gamma,y)}{\partial y}$ evaluated along the learned trajectories at times $t=0,...,T$. Red and blue dots are used for the train and test datasets respectively. Stability regions of implicit layers are highlighted with grey color and the contours depict the values of the stability function.}
     \label{fig:ex_1_vector_fields}
 \end{figure}

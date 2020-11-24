@@ -36,8 +36,8 @@ scalars = { '_div': 'rhs/0.ode_div',
 		}
 
 
-logdir  = "./logs/mlp"
-savedir = "./out/data/ex_1/mlp/"
+logdir  = "./logs"
+savedir = "./output/data/"
 Path(savedir).mkdir(parents=True, exist_ok=True)
 
 

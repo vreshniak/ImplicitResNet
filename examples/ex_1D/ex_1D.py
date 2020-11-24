@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits import mplot3d
 
 import torch
+from torch.utils.tensorboard import SummaryWriter
 
 import ex_setup
 import layers
@@ -22,6 +23,7 @@ if __name__ == '__main__':
 	#########################################################################################
 
 	args = ex_setup.parse_args()
+	if args.seed is not None: torch.manual_seed(args.seed)
 
 	#########################################################################################
 	#########################################################################################
@@ -71,11 +73,10 @@ if __name__ == '__main__':
 
 	#########################################################################################
 	#########################################################################################
-	# Loss and scheduler
+	# Loss
 
-	loss_fn      = torch.nn.MSELoss(reduction='mean')
-	scheduler_fn = lambda optimizer: torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.7, patience=50, verbose=True, threshold=1.e-4, threshold_mode='rel', cooldown=50, min_lr=1.e-6, eps=1.e-8)
-	# scheduler_fn = lambda optimizer: torch.optim.lr_scheduler.StepLR(optimizer, step_size=500, gamma=0.7, last_epoch=-1)
+
+	loss_fn = torch.nn.MSELoss(reduction='mean')
 
 
 	#########################################################################################
@@ -127,87 +128,66 @@ if __name__ == '__main__':
 	########################################################
 
 
-	def get_model(seed=None):
-		if seed is not None: torch.manual_seed(seed)
-		mod = model().to(device=_device)
-		return mod
-
 
 	#########################################################################################
-	# uncommenting this will lead to the increased cost and memory leaking
+	#########################################################################################
+	# init/train/plot model
+
+	# uncommenting this line will enable debug mode and lead to increased cost and memory leaking
 	# torch.autograd.set_detect_anomaly(True)
 
 
-	# if args.mode=="init":
-	# 	# create directories for the checkpoints and logs
-	# 	chkp_dir = "initialization"
-	# 	logdir = Path("logs","init__"+file_name)
-	# 	Path(chkp_dir).mkdir(parents=True, exist_ok=True)
-	# 	writer = SummaryWriter(logdir)
-
-	# 	model       = get_model(args.seed)
-	# 	optimizer   = optimizer_SGD(model, args.lr)
-	# 	scheduler   = None
-	# 	regularizer = None
-
-	# 	train_obj = utils.training_loop(model, dataset, val_dataset, args.batch, optimizer=optimizer, scheduler=scheduler, loss_fn=loss_fn, regularizer=regularizer,
-	# 				writer=writer, write_hist=True, history=False, checkpoint=None)
-
-	# 	# initialize with analytic continuation
-	# 	for theta in np.linspace(0,1,101):
-	# 		model.apply(lambda m: setattr(m,'theta',theta))
-	# 		train_obj(10)
-	# 		torch.save( model.state_dict(), Path(chkp_dir,"%4.2f"%(theta)) )
-
-	# 	writer.close()
+	paths = ex_setup.create_paths(args)
 
 
-	checkpoint_dir_init, checkpoint_dir, out_dir, writer = ex_setup.create_paths(args, file_name)
+	model     = ex_setup.load_model(model(), args, _device)
+	optimizer = ex_setup.get_optimizer('adam', model, args.lr, wdecay=0)
+	scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.7, patience=50, verbose=True, threshold=1.e-4, threshold_mode='rel', cooldown=50, min_lr=1.e-6, eps=1.e-8)
+	# scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=500, gamma=0.7, last_epoch=-1)
+	# lr_schedule = np.linspace(args.lr, args.lr/100, args.epochs)
+	# checkpoint={'epochs':1000, 'name':"models/"+script_name+"/sim_"+str(sim)+'_'+file_name[:]}
+	train_obj = utils.training_loop(model, dataset, val_dataset, args.batch, optimizer=optimizer, scheduler=scheduler, loss_fn=loss_fn, write_hist=False, history=False, checkpoint=None)
 
-	if args.mode!="plot":
+
+	if args.mode=='init':
+		writer = SummaryWriter(Path('logs','init',file_name))
+
+		# initialize with analytic continuation (annealing) of theta
+		for theta in np.linspace(0,1,101):
+			model.apply(lambda m: setattr(m,'theta',theta))
+			train_obj(50, writer=writer)
+			torch.save( model.state_dict(), Path(paths['initialization'],'%4.2f'%(theta)) )
+			print('Saved to: ', Path(paths['initialization'],'%4.2f'%(theta)))
+			# torch.save( model.state_dict(), Path("checkpoints","init_"+args.prefix,"%4.2f"%(theta)) )
+
+		writer.close()
+
+	elif args.mode=="train":
+		assert args.epochs>0, 'number of epochs must be positive'
+		writer = SummaryWriter(Path("logs",file_name))
 		losses = []
-		for sim in range(1):
-			try:
-				model     = get_model(args.seed+sim)
-				optimizer = ex_setup.get_optimizer('adam', model, args.lr, wdecay=0)
-				scheduler = scheduler_fn(optimizer)
 
-				# lr_schedule = np.linspace(args.lr, args.lr/100, args.epochs)
-				# checkpoint={'epochs':1000, 'name':"models/"+script_name+"/sim_"+str(sim)+'_'+file_name[:]}
-				train_obj = utils.training_loop(model, dataset, val_dataset, args.batch, optimizer=optimizer, scheduler=scheduler, loss_fn=loss_fn,
-					writer=writer, write_hist=True, history=False, checkpoint=None)
+		try:
+			# save initial model and train
+			torch.save( model.state_dict(), Path(paths['checkpoints_0'],file_name) )
+			losses.append(train_obj(args.epochs, writer=writer))
+		except:
+			raise
+		finally:
+			torch.save( model.state_dict(), Path(paths['checkpoints'],file_name) )
 
-				torch.save( model.state_dict(), checkpoint_dir_init )
-				losses.append(train_obj(args.epochs))
-
-				# if args.mode=="train":
-				# 	torch.save( model.state_dict(), checkpoint_dir_init )
-				# 	losses.append(train_obj(args.epochs))
-				# elif args.mode=='init':
-				# 	# initialize with analytic continuation
-				# 	for theta in np.linspace(0,1,101):
-				# 		model.apply(lambda m: setattr(m,'theta',theta))
-				# 		train_obj(10)
-				# 		torch.save( model.state_dict(), Path("checkpoints","init_"+args.prefix,"%4.2f"%(theta)) )
-			except:
-				raise
-			finally:
-				torch.save( model.state_dict(), checkpoint_dir )
-
-		if writer is not None:
-			writer.close()
+		writer.close()
 
 	elif args.mode=="plot":
 		fig_no = 0
 
 
-		data_name = ("%s/th%4.2f_T%d_data%d_adiv%4.2f"%(out_dir, args.theta, args.T, args.datasize, args.adiv)).replace('.','')
+		images_output = ("%s/th%4.2f_T%d_data%d_adiv%4.2f"%(Path(paths['output'],'images'), args.theta, args.T, args.datasize, args.adiv)).replace('.','')
 
 
 		###############################################
 		# load model
-		model = get_model(args.seed)
-		missing_keys, unexpected_keys = model.load_state_dict(torch.load(checkpoint_dir, map_location=ex_setup._cpu))
+		# model = ex_setup.load_model(model(), args, _device)
 		model.eval()
 
 
@@ -385,7 +365,7 @@ if __name__ == '__main__':
 		plt.gca().axes.xaxis.set_visible(False)
 		plt.gca().axes.yaxis.set_visible(False)
 		plt.gca().axis('off')
-		plt.savefig(data_name+"_spectrum.pdf", bbox_inches='tight', pad_inches=0.0)
+		plt.savefig(images_output+"_spectrum.pdf", bbox_inches='tight', pad_inches=0.0)
 
 
 		###############################################
@@ -468,7 +448,7 @@ if __name__ == '__main__':
 		plt.gca().axes.xaxis.set_visible(False)
 		plt.gca().axes.yaxis.set_visible(False)
 		plt.gca().axis('off')
-		plt.savefig(data_name+"_traj.pdf", pad_inches=0.0, bbox_inches='tight')
+		plt.savefig(images_output+"_traj.pdf", pad_inches=0.0, bbox_inches='tight')
 
 
 
