@@ -141,7 +141,7 @@ if __name__ == '__main__':
 
 
 	model     = ex_setup.load_model(model(), args, _device)
-	optimizer = ex_setup.get_optimizer('adam', model, args.lr, wdecay=0)
+	optimizer = ex_setup.get_optimizer('adam', model, args.lr, wdecay=args.wdecay)
 	scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.7, patience=50, verbose=True, threshold=1.e-4, threshold_mode='rel', cooldown=50, min_lr=1.e-6, eps=1.e-8)
 	# scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=500, gamma=0.7, last_epoch=-1)
 	# lr_schedule = np.linspace(args.lr, args.lr/100, args.epochs)
