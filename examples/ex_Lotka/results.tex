@@ -1,0 +1,236 @@
+\documentclass{article}
+\usepackage[margin=1in]{geometry}
+
+\pagestyle{empty}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\usepackage{amsmath, amssymb, amsfonts}
+\usepackage{bbm} % \mathbbm
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\usepackage{color}
+\usepackage{xfrac}
+\usepackage{multicol}
+\usepackage{afterpage}
+\usepackage{ifthen}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% figures
+\usepackage{wrapfig}
+\usepackage[usestackEOL]{stackengine}
+\usepackage[export]{adjustbox} % align figures
+% \usepackage{subcaption}
+% \captionsetup{compatibility=false}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% algorithms
+\usepackage{listings}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\usepackage{makecell} % break lines in table cells
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\usepackage{tikz}
+\usepackage{pgfplots}
+\usepackage{pgfplotstable}
+\pgfplotsset{table/search path={output/data}}
+\pgfplotsset{compat=1.15}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\usepgfplotslibrary{statistics}
+\usetikzlibrary{positioning}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+% \DeclareMathOperator*{\argmin}{arg\,min}
+% \DeclareMathOperator{\Tr}{Tr}
+\graphicspath{{./output/images/}}
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% test if imagefile exists and redefine \includegraphics to not fail
+
+\makeatletter % changes the catcode of @ to 11
+\newif\ifgraphicexist
+
+\catcode`\*=11
+\newcommand\imagetest[1]{%
+	\begingroup
+		\global\graphicexisttrue
+			\let\input@path\Ginput@path
+		\filename@parse{#1}%
+		\ifx\filename@ext\relax
+			\@for\Gin@temp:=\Gin@extensions\do{%
+				\ifx\Gin@ext\relax
+					\Gin@getbase\Gin@temp
+				\fi}%
+		\else
+			\Gin@getbase{\Gin@sepdefault\filename@ext}%
+			\ifx\Gin@ext\relax
+				\global\graphicexistfalse
+				\def\Gin@base{\filename@area\filename@base}%
+				\edef\Gin@ext{\Gin@sepdefault\filename@ext}%
+			\fi
+		\fi
+		\ifx\Gin@ext\relax
+			\global\graphicexistfalse
+		\else
+			\@ifundefined{Gin@rule@\Gin@ext}%
+				{\global\graphicexistfalse}%
+				{}%
+		\fi
+		\ifx\Gin@ext\relax
+			\gdef\imageextension{unknown}%
+		\else
+			\xdef\imageextension{\Gin@ext}%
+		\fi
+	\endgroup
+	\ifgraphicexist
+		\expandafter \@firstoftwo
+	\else
+		\expandafter \@secondoftwo
+	\fi
+}
+\catcode`\*=12
+
+
+% redefine \includegraphics
+\let\StandardIncludeGraphics\includegraphics%
+\renewcommand{\includegraphics}[2][]{%
+%	\IfFileExists{./images/#2}{\StandardIncludeGraphics[#1]{#2}}{
+	\imagetest{#2}{\StandardIncludeGraphics[#1]{#2}}{
+		\fbox{ File "\detokenize{#2}" missing }
+	}
+}
+
+\makeatother % changes the catcode of @ back to 12
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+
+
+\begin{document}
+
+
+
+\pgfplotscreateplotcyclelist{divlist}{
+	{cyan!80!black},
+	{red},
+	{blue},
+	{orange},
+	{black}
+}
+\pgfplotscreateplotcyclelist{thetalist}{
+	{dotted},
+	{loosely dotted},
+	{dashed},
+	{loosely dashed},
+	{solid}
+}
+\pgfplotscreateplotcyclelist{thetalist3}{
+	{dotted},
+	{dashed},
+	{solid}
+}
+
+
+\begin{figure}[t]
+	\centering
+	\foreach \th in {0.00, 0.50, 1.00}
+	{
+		\begin{tikzpicture}
+			\begin{axis} [
+					%scale=\scale,
+					%scale only axis,
+					width=0.37\textwidth,
+					ymode = normal,
+					xticklabels={,,},
+					yticklabels={,,},
+					enlargelimits=false,
+					axis on top,
+					title=${\theta = \th}$,
+					tick style={draw=none},
+					very thick ]
+
+					\addplot graphics [points={(0,0) (3,2)}, includegraphics={trim=0 0 0 0,clip}] {th\th_T10_steps50_data_100_50/vector_field.pdf};
+					\foreach \i in {1,3,...,9}
+					{
+						\pgfmathparse{int(\i+1)}\edef\j{\pgfmathresult}
+						\addplot [solid, blue] table[x index=\i, y index=\j, col sep=comma] {th\th_T10_steps50_data_100_50/solution.csv};
+						\addplot [only marks, mark size=1pt, red] table[x index=\i, y index=\j, col sep=comma] {training_data.csv};
+					}
+			\end{axis}
+		\end{tikzpicture}
+	}
+	\foreach \th in {0.00, 0.50, 1.00}
+	{
+		\begin{tikzpicture}
+			\begin{axis} [
+					%scale=\scale,
+					%scale only axis,
+					width=0.37\textwidth,
+					ymode = normal,
+					xticklabels={,,},
+					yticklabels={,,},
+					enlargelimits=false,
+					axis on top,
+					tick style={draw=none},
+					very thick ]
+					\addplot graphics [points={(0,0) (3,2)}, includegraphics={trim=0 0 0 0,clip}] {th\th_T10_steps50_data_100_50/spectrum.pdf};
+			\end{axis}
+		\end{tikzpicture}
+		}
+    \caption{(Top) Learned vector fields and trajectories on the time interval $t\in [0,10]$. (Bottom) Eigenvalues of the vector fields along these trajectories.}
+    \label{fig:ex_3_solution}
+\end{figure}
+
+
+\begin{figure}[t]
+	\centering
+	\ref{named0.00}\\
+	\foreach \file in {extrap_solution, learned_ode}
+	{
+		\foreach \th/\shift in {0.00/-1, 0.50/0, 1.00/1}
+		{
+			\begin{tikzpicture}[every mark/.append style={mark size=1pt}]
+				\begin{axis} [
+						%scale=\scale,
+						%scale only axis,
+						width=0.35\textwidth,
+						ymode = normal,
+						cycle list name = thetalist3,
+						cycle list shift = \shift,
+						xticklabels={,,},
+						yticklabels={,,},
+						title style={font=\small},
+						enlargelimits=false,
+						axis on top,
+						axis line style={draw=none},
+						tick style={draw=none},
+						legend to name=named\th,
+						legend columns=-1,
+						legend style={draw=none},
+						very thick ]
+
+						\addplot [only marks, red] table[x index=9, y index=10, col sep=comma] {training_data.csv};
+
+						\ifthenelse{ \equal{\file}{learned_ode} \and \equal{\th}{0.00} }{
+							\addplot  table[x index=9, y index=10, col sep=comma] {th\th_T10_steps50_data_100_50/\file.csv};
+							\addplot +[domain=0:0.001] {x};
+							\addplot +[domain=0:0.001] {x};
+							\addlegendentry[black]{data\phantom{asd}};
+							\addlegendentryexpanded[black]{$\theta=0.0$\noexpand\phantom{asd}};
+							\addlegendentryexpanded[black]{$\theta=0.5$\noexpand\phantom{asd}};
+							\addlegendentryexpanded[black]{$\theta=1.0$\noexpand\phantom{asd}};
+						}{
+							\addplot table[x index=9, y index=10, col sep=comma] {th\th_T10_steps50_data_100_50/\file.csv};
+						}
+				\end{axis}
+			\end{tikzpicture}
+			\qquad
+		}\\
+	}
+    \caption{(Top) A single trajectory generated by three trained implicit residual networks on the time interval $t\in [0,200]$; (Bottom) continuous-time trajectory generated by the learned vector fields of these residual networks on the same time interval. }
+    \label{fig:ex_3_extrapolation}
+\end{figure}
+
+
+
+\end{document}
