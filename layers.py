@@ -93,9 +93,9 @@ _backward_scipy = False
 
 class linsolve_backprop(Function):
 	@staticmethod
-	def forward(ctx, self, y, y_fp):
+	def forward(ctx, self, y, y_fp, y_fp2):
 		ctx.mark_non_differentiable(y)
-		ctx.save_for_backward(y, y_fp)
+		ctx.save_for_backward(y, y_fp2)
 		ctx.self = self
 		return y_fp
 
@@ -111,6 +111,7 @@ class linsolve_backprop(Function):
 		# freeze parameters so that .backward() does not propagate corresponding gradients
 		ctx.self.rhs.requires_grad_(False)
 
+		start = time.time()
 		if _backward_scipy:
 			tol = atol = torch.tensor(_linTOL)
 			TOL = torch.max(tol*dy.norm(), atol)
@@ -154,18 +155,20 @@ class linsolve_backprop(Function):
 				return ctx.residual
 			nsolver.step(closure)
 			dx = dx.detach()
+		stop = time.time()
 
 		# unfreeze parameters
 		ctx.self.rhs.requires_grad_(True)
 
 		if _collect_stat:
 			ctx.self._stat['backward/steps']        = ctx.self._stat.get('backward/steps',0)        + 1
+			ctx.self._stat['backward/walltime']     = ctx.self._stat.get('backward/walltime',0)     + (stop-start)
 			ctx.self._stat['backward/lin_residual'] = ctx.self._stat.get('backward/lin_residual',0) + ctx.residual if isinstance(ctx.residual,int) else ctx.residual.detach() #(dx-A_dot(dx))
 			ctx.self._stat['backward/lin_iters']    = ctx.self._stat.get('backward/lin_iters',0)    + ctx.lin_iters
 
 		ctx.residual  = 0
 		ctx.lin_iters = 0
-		return None, None, dx
+		return None, None, dx, None
 
 
 
@@ -675,10 +678,7 @@ class theta_solver(ode_solver):
 	########################################
 
 
-	# def linsolve(self, dy, tol):
-
-
-	def step_fun(self, t, x, y=None):
+	def step_fun(self, t, x, y):
 		# if theta==1, use left endpoint
 		t = (t + self.theta * self.h) if self.theta<1 else t
 		z = ((1-self.theta)*x if self.theta<1 else 0) + (self.theta*y if self.theta>0 else 0)
@@ -697,6 +697,7 @@ class theta_solver(ode_solver):
 
 		residual_fn = lambda z: self.residual(t, [x.detach(),z])
 
+		start = time.time()
 		if self.theta>0:
 			# initial condition: make new (that's why clone) leaf (that's why detach) node which requires gradient
 			y = x.clone().detach().requires_grad_(True)
@@ -716,18 +717,20 @@ class theta_solver(ode_solver):
 			if res['residual']>self.tol:
 				print('Warning: convergence not achieved at t=%d, residual is %.2E'%(t, res['residual'].cpu().detach().numpy()))
 
-			y = linsolve_backprop.apply(self, y, x + self.step_fun(t, x, y))
+			# NOTE: two evaluations of step_fun are requried anyway!
+			y = linsolve_backprop.apply(self, y, x + self.step_fun(t, x, y.detach()), self.step_fun(t, x.detach(), y))
 
 			# unfreeze spectral normalization
 			# self.rhs.train(mode=self.training)
 		else:
-			y = x + self.step_fun(t, x)
-
+			y = x + self.step_fun(t, x, x)
+		stop = time.time()
 
 		if _collect_stat:
 			mode = 'forward_train/' if self.training else 'forward_valid/'
 			#######################
 			self._stat[mode+'steps']    = self._stat.get(mode+'steps',0)    + 1
+			self._stat[mode+'walltime'] = self._stat.get(mode+'walltime',0) + (stop-start)
 			self._stat[mode+'iters']    = self._stat.get(mode+'iters',0)    + res['iters']
 			self._stat[mode+'residual'] = self._stat.get(mode+'residual',0) + res['residual']
 		return y
