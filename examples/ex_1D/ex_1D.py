@@ -130,9 +130,6 @@ if __name__ == '__main__':
 	def get_model(seed=None):
 		if seed is not None: torch.manual_seed(seed)
 		mod = model().to(device=_device)
-		if args.init=="warmup" and args.mode!="initialize":
-			missing_keys, unexpected_keys = mod.load_state_dict(torch.load(Path("initialization","%4.2f"%args.theta), map_location=_device))
-			print(missing_keys, unexpected_keys)
 		return mod
 
 
