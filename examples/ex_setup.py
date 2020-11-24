@@ -225,7 +225,9 @@ def create_paths(args):
 		'initialization': Path('checkpoints','init'),
 		'checkpoints_0':  Path('checkpoints','epoch_0'),
 		'checkpoints':    Path('checkpoints','epoch_last'),
-		'output':         Path('output')
+		'output':         Path('output'),
+		'output_images':  Path("output","images"),
+		'output_data':    Path("output","data")
 	}
 
 	return paths
@@ -237,42 +239,45 @@ def create_paths(args):
 	# return checkpoint_dir_0, checkpoint_dir, out_dir
 
 
-def load_model(model, args, device=_cpu):
+def load_model(model, args, device=_cpu, location=None):
 	mod = model.to(device=device)
 
-	paths     = create_paths(args)
-	file_name = make_name(args, verbose=False)
+	if location is not None:
+		load_dir = location
+	else:
+		paths     = create_paths(args)
+		file_name = make_name(args, verbose=False)
 
-	if args.mode=='init':
-		return mod
-	if args.mode=='train':
-		if args.init=='rnd':
+		if args.mode=='init':
 			return mod
-		elif args.init=="init":
-			load_dir = Path(paths['initialization'],'%4.2f'%(args.theta))
-			# import re
-			# load_dir = Path( checkpoint_dir, re.sub('theta_\d*.\d*','theta_'+str(args.theta),file_name) )
-		elif args.init=="cont":
+		if args.mode=='train':
+			if args.init=='rnd':
+				return mod
+			elif args.init=="init":
+				load_dir = Path(paths['initialization'],'%4.2f'%(args.theta))
+				# import re
+				# load_dir = Path( checkpoint_dir, re.sub('theta_\d*.\d*','theta_'+str(args.theta),file_name) )
+			elif args.init=="cont":
+				load_dir = Path(paths['checkpoints'], file_name)
+		if args.mode=='plot' or args.mode=='test':
 			load_dir = Path(paths['checkpoints'], file_name)
-	if args.mode=='plot' or args.mode=='test':
-		load_dir = Path(paths['checkpoints'], file_name)
 
-	# if args.init=='rnd' and args.mode!='plot' and args.mode!='test':
-	# 	return mod
-	# else:
-	# 	paths     = create_paths(args)
-	# 	file_name = make_name(args)
+		# if args.init=='rnd' and args.mode!='plot' and args.mode!='test':
+		# 	return mod
+		# else:
+		# 	paths     = create_paths(args)
+		# 	file_name = make_name(args)
 
-	# 	# initialize model
-	# 	if args.mode=='train':
-	# 		if args.init=="init":
-	# 			load_dir = Path(paths['initialization'],'%4.2f'%(args.theta))
-	# 			# import re
-	# 			# load_dir = Path( checkpoint_dir, re.sub('theta_\d*.\d*','theta_'+str(args.theta),file_name) )
-	# 		elif args.init=="cont":
-	# 			load_dir = Path(paths['checkpoints'], file_name)
-	# 	else:
-	# 		load_dir = Path(paths['checkpoints'], file_name)
+		# 	# initialize model
+		# 	if args.mode=='train':
+		# 		if args.init=="init":
+		# 			load_dir = Path(paths['initialization'],'%4.2f'%(args.theta))
+		# 			# import re
+		# 			# load_dir = Path( checkpoint_dir, re.sub('theta_\d*.\d*','theta_'+str(args.theta),file_name) )
+		# 		elif args.init=="cont":
+		# 			load_dir = Path(paths['checkpoints'], file_name)
+		# 	else:
+		# 		load_dir = Path(paths['checkpoints'], file_name)
 
 	missing_keys, unexpected_keys = mod.load_state_dict(torch.load(load_dir, map_location=device))
 	mod.apply(lambda m: setattr(m,'theta',args.theta))
