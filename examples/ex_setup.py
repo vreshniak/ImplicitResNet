@@ -10,7 +10,6 @@ import numpy as np
 import math
 
 from pathlib import Path
-from torch.utils.tensorboard import SummaryWriter
 
 import torch
 import utils
@@ -28,41 +27,6 @@ _cpu   = torch.device('cpu')
 _dtype = torch.float
 
 _collect_stat = False
-
-
-
-###############################################################################
-###############################################################################
-
-
-def get_optimizer(name, model, lr, wdecay=0):
-	if name=='adam':
-		return torch.optim.Adam(model.parameters(),    lr=lr, weight_decay=wdecay)
-	elif name=='rms':
-		return torch.optim.RMSprop(model.parameters(), lr=lr, weight_decay=wdecay)
-	elif name=='sgd':
-		return torch.optim.SGD(model.parameters(),     lr=lr, weight_decay=wdecay, momentum=0.5)
-	elif name=='lbfgs':
-		return torch.optim.LBFGS(model.parameters(),   lr=1., max_iter=100, max_eval=None, tolerance_grad=1.e-9, tolerance_change=1.e-9, history_size=100, line_search_fn='strong_wolfe')
-
-
-
-def create_paths(args, file_name):
-	subdir = "mlp" if args.prefix is None else args.prefix
-	# if args.mode=="init": subdir += "/init"
-
-	Path("checkpoints",subdir,"epoch0").mkdir(parents=True, exist_ok=True)
-	Path("checkpoints",subdir).mkdir(parents=True, exist_ok=True)
-	Path("out",subdir).mkdir(parents=True, exist_ok=True)
-	logdir = Path("logs",subdir,file_name)
-	writer = SummaryWriter(logdir) if args.epochs>0 else None
-
-	checkpoint_dir_0 = Path("checkpoints",subdir,'epoch0',file_name)
-	checkpoint_dir   = Path("checkpoints",subdir,file_name)
-	out_dir = Path("out",subdir)
-
-	return checkpoint_dir_0, checkpoint_dir, out_dir, writer
-
 
 
 ###############################################################################
@@ -166,10 +130,10 @@ def option_type(option):
 	return opt2type[option]
 
 
-def make_name(args):
+def make_name(args, verbose=True):
 	sep   = '|'
 	opsep = '_'
-	print("\n-------------------------------------------------------------------")
+	if verbose: print("\n-------------------------------------------------------------------")
 	# file_name = str(args.prefix)+sep if args.prefix is not None and args.prefix!=opsep else ''
 	file_name = ''
 	max_len = 0
@@ -179,7 +143,7 @@ def make_name(args):
 	max_len += 1
 	for arg, value in vars(args).items():
 		if value is not None:
-			print("{0:>{length}}: {1}".format(arg,str(value),length=max_len))
+			if verbose: print("{0:>{length}}: {1}".format(arg,str(value),length=max_len))
 			if arg!='prefix' and arg!='sigma' and arg!='mode' and arg!='method' and arg!='steps' and arg!='eigs' and arg!='tol' and arg!='ajdiag' and arg!='diaval': # and arg!='minrho' and arg!='maxrho':
 				file_name += arg+opsep+str(value)+sep
 			if arg=='steps' and value>0:
@@ -198,7 +162,9 @@ def make_name(args):
 	if args.piters>0:
 		# file_name += 'rho'+opsep+str(args.minrho)+opsep+str(args.maxrho)+sep
 		file_name += 'eigs'+opsep+str(args.eigs[0])+opsep+str(args.eigs[1])+sep
-	print("-------------------------------------------------------------------")
+	if args.prefix is not None:
+		file_name = str(args.prefix) + file_name
+	if verbose: print("-------------------------------------------------------------------")
 	return file_name[:-len(sep)]
 
 
@@ -222,6 +188,101 @@ def get_options_from_name(name):
 		# opt_name, opt_val = opt.split(opsep)
 		# options[opt_name] = option_type(opt_name)(opt_val)
 	return options
+
+
+
+
+###############################################################################
+###############################################################################
+
+
+
+
+
+def get_optimizer(name, model, lr, wdecay=0):
+	if name=='adam':
+		return torch.optim.Adam(model.parameters(),    lr=lr, weight_decay=wdecay)
+	elif name=='rms':
+		return torch.optim.RMSprop(model.parameters(), lr=lr, weight_decay=wdecay)
+	elif name=='sgd':
+		return torch.optim.SGD(model.parameters(),     lr=lr, weight_decay=wdecay, momentum=0.5)
+	elif name=='lbfgs':
+		return torch.optim.LBFGS(model.parameters(),   lr=1., max_iter=100, max_eval=None, tolerance_grad=1.e-9, tolerance_change=1.e-9, history_size=100, line_search_fn='strong_wolfe')
+
+
+
+def create_paths(args):
+	# subdir = "mlp" if args.prefix is None else args.prefix
+	# if args.mode=="init": subdir += "/init"
+
+	Path("checkpoints","init").mkdir(parents=True, exist_ok=True)
+	Path("checkpoints","epoch_0").mkdir(parents=True, exist_ok=True)
+	Path("checkpoints","epoch_last").mkdir(parents=True, exist_ok=True)
+	Path("output","images").mkdir(parents=True, exist_ok=True)
+	Path("output","data").mkdir(parents=True, exist_ok=True)
+
+	paths = {
+		'initialization': Path('checkpoints','init'),
+		'checkpoints_0':  Path('checkpoints','epoch_0'),
+		'checkpoints':    Path('checkpoints','epoch_last'),
+		'output':         Path('output')
+	}
+
+	return paths
+	# checkpoint_dir_0 = Path("checkpoints",subdir,'epoch0',file_name)
+	# checkpoint_dir   = Path("checkpoints",subdir,file_name)
+	# checkpoint_dir_0 = Path("checkpoints",'epoch0')
+	# checkpoint_dir   = Path("checkpoints")
+	# out_dir = Path("out")
+	# return checkpoint_dir_0, checkpoint_dir, out_dir
+
+
+def load_model(model, args, device=_cpu):
+	mod = model.to(device=device)
+
+	paths     = create_paths(args)
+	file_name = make_name(args, verbose=False)
+
+	if args.mode=='init':
+		return mod
+	if args.mode=='train':
+		if args.init=='rnd':
+			return mod
+		elif args.init=="init":
+			load_dir = Path(paths['initialization'],'%4.2f'%(args.theta))
+			# import re
+			# load_dir = Path( checkpoint_dir, re.sub('theta_\d*.\d*','theta_'+str(args.theta),file_name) )
+		elif args.init=="cont":
+			load_dir = Path(paths['checkpoints'], file_name)
+	if args.mode=='plot' or args.mode=='test':
+		load_dir = Path(paths['checkpoints'], file_name)
+
+	# if args.init=='rnd' and args.mode!='plot' and args.mode!='test':
+	# 	return mod
+	# else:
+	# 	paths     = create_paths(args)
+	# 	file_name = make_name(args)
+
+	# 	# initialize model
+	# 	if args.mode=='train':
+	# 		if args.init=="init":
+	# 			load_dir = Path(paths['initialization'],'%4.2f'%(args.theta))
+	# 			# import re
+	# 			# load_dir = Path( checkpoint_dir, re.sub('theta_\d*.\d*','theta_'+str(args.theta),file_name) )
+	# 		elif args.init=="cont":
+	# 			load_dir = Path(paths['checkpoints'], file_name)
+	# 	else:
+	# 		load_dir = Path(paths['checkpoints'], file_name)
+
+	missing_keys, unexpected_keys = mod.load_state_dict(torch.load(load_dir, map_location=device))
+	mod.apply(lambda m: setattr(m,'theta',args.theta))
+	print('Mode: ', args.mode)
+	print('Load model from: ',load_dir)
+	print('\tmissing_keys:    ', missing_keys)
+	print('\tunexpected_keys: ', unexpected_keys)
+	return mod
+
+
 
 
 
