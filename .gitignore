@@ -1,7 +1,8 @@
 checkpoints
 logs
 out
-*.pdf
-*.eps
+output
+# *.pdf
+# *.eps
 .DS_Store
 __pycache__
