@@ -1,0 +1,31 @@
+\documentclass{article}
+\usepackage[margin=1in]{geometry}
+
+\pagestyle{empty}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\usepackage{amsmath, amssymb, amsfonts}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\usepackage{xfrac}
+\usepackage{multirow}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+\begin{document}
+
+\begin{table}[t]
+	\centering
+    \def\arraystretch{2.0}
+	\begin{tabular}{|c|c|c|c|c|c||c|c|c|c|c|}
+		\cline{1-11}
+		\multirow{2}{*}{\shortstack[c]{Noise\\ intensity}} & \multicolumn{5}{c|}{Top-1 accuracy}  & \multicolumn{5}{c|}{Top-2 accuracy}       \\ \cline{2-11}
+		         &  $\theta=0$  &  0.25  &  0.50  &  0.75  & 1.00 &  $\theta=0$  & 0.25  &  0.50  &  0.75  & 1.00 \\ \hline
+		\input{output/table.txt}
+		\hline
+	\end{tabular}
+\caption{Classifiaction accuracy for different levels of Gaussian noise corruption.}
+\label{tab:ex_4_noise}
+\end{table}
+
+
+\end{document}
