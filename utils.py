@@ -54,7 +54,7 @@ class training_loop:
 		self.curr_epoch = init_epoch
 		self.checkpoint=checkpoint
 
-	def __call__(self,num_epochs,optimizer=None,scheduler=None,lr_schedule=None,regularizer=None,checkpoint=None):
+	def __call__(self,num_epochs,optimizer=None,scheduler=None,lr_schedule=None,regularizer=None,checkpoint=None,writer=None):
 		self.curr_epoch += num_epochs
 		if optimizer is not None:
 			self.optimizer   = optimizer
@@ -67,6 +67,7 @@ class training_loop:
 			self.lr_schedule = lr_schedule
 		if regularizer is not None: self.regularizer = regularizer
 		if checkpoint is not None:  self.checkpoint  = checkpoint
+		if writer is not None:      self.writer      = writer
 		if self.history:
 			return train(self.model,self.optimizer,num_epochs,self.dataset,self.val_dataset,self.batch_size,self.loss_fn,self.accuracy_fn,self.regularizer,self.scheduler,self.lr_schedule,self.writer,self.write_hist,self.curr_epoch-num_epochs,self.history,self.checkpoint)
 		else:
@@ -167,7 +168,7 @@ def train(model,optimizer,num_epochs,dataset,val_dataset,batch_size,loss_fn,accu
 				for key, MODEL in model.items():
 					# y_pred    = MODEL(x)
 					y_pred    = MODEL(*x)
-					if y.shape!=y_pred.shape:
+					if y.shape!=y_pred.shape and epoch==0:
 						print("Warning: "+str(y.shape)+" not equal to "+str(y_pred.shape))
 					# if not isinstance(loss_fn, torch.nn.CrossEntropyLoss):
 					# 	assert y.shape==y_pred.shape, str(y.shape)+" not equal to "+str(y_pred.shape)
