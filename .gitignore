@@ -2,6 +2,7 @@ checkpoints
 logs
 out
 output
+MNIST
 # *.pdf
 # *.eps
 .DS_Store
