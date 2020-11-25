@@ -26,7 +26,7 @@ _gpu   = torch.device('cuda')
 _cpu   = torch.device('cpu')
 _dtype = torch.float
 
-_collect_stat = False
+_collect_stat = True
 
 
 ###############################################################################
@@ -456,42 +456,6 @@ class rhs_mlp(rhs_base):
 		self.dim = data_dim+args.codim
 		super().__init__(args)
 
-		# ###############################
-		# # scales of each dimension
-		# # if args.scales=='learn':
-		# # 	if self.maxrho>0:
-		# # 		# initrho = 1.0 if self.maxrho>1 else self.maxrho
-		# # 		# initrho = 0.1*self.maxrho
-		# # 		# self._scales = torch.nn.parameter.Parameter( np.log(initrho/(self.maxrho-initrho)) * torch.ones((1,dim), dtype=torch.float), requires_grad=True)
-		# # 	else:
-		# # 		self._scales = torch.tensor([0.0], dtype=torch.float)
-
-		# # 	if self.maxshift>0:
-		# # 		# initshift = 0.5 if self.maxshift>1 else 0.5*self.maxshift
-		# # 		initshift = 0.1*self.maxshift
-		# # 		self._eigshift = torch.nn.parameter.Parameter( np.log(initshift/(self.maxshift-initshift)) * torch.ones((1,dim), dtype=torch.float), requires_grad=True)
-		# # 	else:
-		# # 		self._eigshift = torch.tensor([0.0], dtype=torch.float)
-		# # elif args.scales=='equal':
-		# # 	self._scales   = torch.tensor([1.0]) if math.isnan(self.args.eigs[0]) else torch.tensor([self.maxrho],   dtype=torch.float)
-		# # 	self._eigshift = torch.tensor([1.0]) if math.isnan(self.args.eigs[1]) else torch.tensor([self.maxshift], dtype=torch.float)
-		# if args.scales=='learn' and args.piters>0:
-		# 	if self.max_rho>0:
-		# 		initrho = 0.1*self.max_rho
-		# 		self._scales = torch.nn.parameter.Parameter( np.log(initrho/(self.max_rho-initrho)) * torch.ones((1,dim), dtype=torch.float), requires_grad=True)
-		# 	else:
-		# 		self._scales = torch.tensor([0.0], dtype=torch.float)
-		# 	self._eigshift = torch.tensor([(self.min_eig+self.max_eig)/2], dtype=torch.float)
-		# else:
-		# 	self._scales   = torch.tensor([1.0])
-		# 	self._eigshift = torch.tensor([0.0])
-		# # elif args.scales=='equal':
-		# # 	self._scales   = torch.tensor([1.0]) if math.isnan(self.args.eigs[0]) else torch.tensor([self.maxrho],   dtype=torch.float)
-		# # 	self._eigshift = torch.tensor([0.0]) if math.isnan(self.args.eigs[1]) else torch.tensor([self.maxshift], dtype=torch.float)
-
-		###############################
-		# RHS function
-
 		# activation
 		if len(args.sigma)==1:
 			sigma, final_activation = args.sigma[0], None
@@ -503,7 +467,7 @@ class rhs_mlp(rhs_base):
 		# depth of rhs
 		rhs_depth = args.steps if args.aTV>=0 else 1
 
-		# structure of rhs
+		# structured rhs
 		structure = args.prefix if args.prefix is not None else 'mlp'
 		if structure=='par':
 			self.rhs = torch.nn.ModuleList( [ layers.ParabolicPerceptron( dim=self.dim, width=args.width, activation=sigma, power_iters=args.piters) for _ in range(rhs_depth) ] )
@@ -526,49 +490,20 @@ class rhs_mlp(rhs_base):
 
 class rhs_conv2d(rhs_base):
 	def __init__(self, channels, args):
+		self.channels = channels
 		super().__init__(args)
 
-		if args.scales=='learn' and args.piters>0:
-			if self.max_rho>0:
-				initrho = 0.1*self.max_rho
-				self._scales = torch.nn.parameter.Parameter( np.log(initrho/(self.max_rho-initrho)) * torch.ones((1,channels,1,1), dtype=torch.float), requires_grad=True)
-			else:
-				self.register_buffer('_scales', torch.tensor([0.0], dtype=torch.float))
-			self.register_buffer('_eigshift', torch.tensor([(self.min_eig+self.max_eig)/2], dtype=torch.float))
-		else:
-			self.register_buffer('_scales',   torch.tensor([1.0], dtype=torch.float))
-			self.register_buffer('_eigshift', torch.tensor([0.0], dtype=torch.float))
-		# elif args.scales=='equal':
-		# 	self._scales   = torch.tensor([1.0]) if math.isnan(self.args.eigs[0]) else torch.tensor([self.maxrho],   dtype=torch.float)
-		# 	self._eigshift = torch.tensor([0.0]) if math.isnan(self.args.eigs[1]) else torch.tensor([self.maxshift], dtype=torch.float)
+		# depth of rhs
+		rhs_depth = args.steps if args.aTV>=0 else 1
 
+		# define rhs
+		self.rhs = torch.nn.ModuleList( [ layers.PreActConv2d(channels, depth=args.depth, kernel_size=3, activation='relu', power_iters=0) for _ in range(rhs_depth) ] )
 
-		###############################
-		F_depth = args.steps if args.aTV>=0 else 1
-
-		# rhs
-		self.rhs = torch.nn.ModuleList( [ layers.PreActConv2d(channels, depth=args.depth, kernel_size=3, activation='relu', power_iters=0) for _ in range(F_depth) ] )
-
-
-		###############################
-		# intialization
+		# intialize rhs
 		self.initialize()
-		# perform initial spectral normalization
-		if args.piters>0:
-			self.spectral_normalization(torch.ones((1,channels,5,5)), 10)
 
-
-		# optimizer = torch.optim.SGD(self.parameters(), lr=1.e-2, momentum=0.5)
-		# y = torch.ones((1,channels,5,5))
-		# for i in range(100):
-		# 	div = 0
-		# 	for t in range(args.steps):
-		# 		divt, _ = self.divjac(t, y)
-		# 		div = div + divt
-		# 	(0-div).backward()
-		# 	self.spectral_normalization(y, 1)
-		# 	optimizer.step()
-
+	def ones_like_input(self):
+		return torch.ones((1,self.channels,1,1))
 
 
 
