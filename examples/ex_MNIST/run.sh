@@ -22,7 +22,7 @@ function run {
 		--sigma    relu  \
 		\
 		--scales   learn \
-		--piters   3     \
+		--piters   1     \
 		--eigs    -2.5 1 \
 		\
 		--init     rnd   \
@@ -31,8 +31,7 @@ function run {
 		--datasize 1000  \
 		--batch    200   \
 		\
-		--aTV      1.e-3 \
-		--aresid   1     \
+		--aTV      0     \
 		--adiv     1.e-1 \
 		--mciters  1
 }

@@ -83,9 +83,9 @@ if __name__ == '__main__':
 
 	########################################################
 	class ode_block(ex_setup.ode_block_base):
-		def __init__(self, channels):
+		def __init__(self, im_shape):
 			super().__init__(args)
-			self.ode = layers.theta_solver( ex_setup.rhs_conv2d(channels, args), args.T, args.steps, args.theta, tol=args.tol )
+			self.ode = layers.theta_solver( ex_setup.rhs_conv2d(im_shape, args), args.T, args.steps, args.theta, tol=args.tol )
 	########################################################
 
 
@@ -98,14 +98,14 @@ if __name__ == '__main__':
 			self.net = torch.nn.Sequential(
 				######################################
 				torch.nn.Conv2d(1, ch, 7, stride=2, padding=3, bias=False),			#chx14x14	[0]
-				torch.nn.MaxPool2d(3, stride=2),									#chx7x7		[1]
-				ode_block(ch),														#chx7x7		[2]
+				torch.nn.MaxPool2d(3, stride=2),									#chx6x6		[1]
+				ode_block((ch,6,6)),												#chx6x6		[2]
 				######################################
-				torch.nn.Conv2d(ch, 2*ch, 3, stride=2, padding=1, bias=False),		#2chx4x4	[3]
-				ode_block(2*ch),													#2chx4x4	[4]
+				torch.nn.Conv2d(ch, 2*ch, 3, stride=2, padding=1, bias=False),		#2chx3x3	[3]
+				ode_block((2*ch,3,3)),												#2chx3x3	[4]
 				######################################
 				torch.nn.Conv2d(2*ch, 4*ch, 3, stride=2, padding=1, bias=False),	#4chx2x2	[5]
-				ode_block(4*ch),													#			[6]
+				ode_block((4*ch,2,2)),												#			[6]
 				######################################
 				# Classifier
 				torch.nn.AvgPool2d(2),												#4chx1x1	[7]
@@ -201,7 +201,7 @@ if __name__ == '__main__':
 		###############################################
 		# model response to corrupted images
 
-		for std in [0.0, 0.1, 0.2, 0.3, 0.4, 0.5]:
+		for std in [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]:
 			out_noise = []
 			labels    = []
 
