@@ -27,8 +27,8 @@ import utils
 
 # global parameters
 _TOL = 1.e-6
-_linTOL = 1.e-6
-_max_iters = 100
+_linTOL = 1.e-5
+_max_iters = 200
 
 _collect_stat  = True
 _forward_stat  = {}
@@ -149,6 +149,7 @@ class linsolve_backprop(Function):
 				nsolver.zero_grad()
 				residual = ( dx - A_dot(dx) - dy ).pow(2).sum() / batch_dim
 				if residual>_linTOL**2:
+				# if residual>_linTOL:
 					residual.backward(retain_graph=True)
 				ctx.residual = torch.sqrt(residual)
 				ctx.lin_iters += 1
@@ -715,7 +716,7 @@ class theta_solver(ode_solver):
 
 			# assert residual[0]<1.e-2, 'Error: divergence at t=%d, residual is %.2E'%(self.t, residual[0].detach().numpy())
 			if res['residual']>self.tol:
-				print('Warning: convergence not achieved at t=%d, residual is %.2E'%(t, res['residual'].cpu().detach().numpy()))
+				print('Warning: convergence not achieved for %s at t=%d, residual is %.2E'%(self.name, t, res['residual'].cpu().detach().numpy()))
 
 			# NOTE: two evaluations of step_fun are requried anyway!
 			y = linsolve_backprop.apply(self, y, x + self.step_fun(t, x, y.detach()), self.step_fun(t, x.detach(), y))
