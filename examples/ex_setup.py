@@ -489,21 +489,21 @@ class rhs_mlp(rhs_base):
 
 
 class rhs_conv2d(rhs_base):
-	def __init__(self, channels, args):
-		self.channels = channels
+	def __init__(self, im_shape, args, kernel_size=3):
+		self.im_shape = im_shape
 		super().__init__(args)
 
 		# depth of rhs
 		rhs_depth = args.steps if args.aTV>=0 else 1
 
 		# define rhs
-		self.rhs = torch.nn.ModuleList( [ layers.PreActConv2d(channels, depth=args.depth, kernel_size=3, activation='relu', power_iters=0) for _ in range(rhs_depth) ] )
+		self.rhs = torch.nn.ModuleList( [ layers.PreActConv2d(channels=im_shape[0], depth=args.depth, kernel_size=kernel_size, activation='relu', power_iters=args.piters) for _ in range(rhs_depth) ] )
 
 		# intialize rhs
 		self.initialize()
 
 	def ones_like_input(self):
-		return torch.ones((1,self.channels,1,1))
+		return torch.ones((1,*self.im_shape))
 
 
 
