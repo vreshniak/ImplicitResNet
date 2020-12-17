@@ -16,10 +16,8 @@ from torch.nn.functional import linear, conv2d, conv_transpose2d
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.tensorboard import SummaryWriter
 
-from . import utils
-# from . import utils
+import utils
 # from jacobian import JacobianReg
-# print(dir(utils))
 
 
 
