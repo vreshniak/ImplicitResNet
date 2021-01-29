@@ -75,9 +75,9 @@ class training_loop:
 
 
 
-def train(model,optimizer,num_epochs,dataset,val_dataset,batch_size,loss_fn,accuracy_fn=None,regularizer=None,scheduler=None,lr_schedule=None,writer=None,write_hist=False,epoch0=0,history=False,checkpoint=None):
+def train(model,optimizer,num_epochs,dataset,val_dataset,batch_size,loss_fn,accuracy_fn=None,regularizer=None,scheduler=None,lr_schedule=None,writer=None,write_hist=False,epoch0=0,history=False,checkpoint=None,pin_memory=False):
 	stat_freq = 1
-	val_freq  = 10
+	val_freq  = 1
 	hist_freq = 10
 	if history:
 		hist_i = 0
@@ -90,8 +90,8 @@ def train(model,optimizer,num_epochs,dataset,val_dataset,batch_size,loss_fn,accu
 		batch_size     = len(dataset)
 		val_batch_size = len(val_dataset)
 		batch_shuffle  = False
-	dataloader     = torch.utils.data.DataLoader(dataset,     batch_size=batch_size,     shuffle=batch_shuffle)
-	val_dataloader = torch.utils.data.DataLoader(val_dataset, batch_size=val_batch_size, shuffle=False)
+	dataloader     = torch.utils.data.DataLoader(dataset,     batch_size=batch_size,     shuffle=batch_shuffle, pin_memory=pin_memory)
+	val_dataloader = torch.utils.data.DataLoader(val_dataset, batch_size=val_batch_size, shuffle=False,         pin_memory=pin_memory)
 
 	# convert model to dictionary of models
 	if isinstance(model, list):
@@ -169,7 +169,7 @@ def train(model,optimizer,num_epochs,dataset,val_dataset,batch_size,loss_fn,accu
 					# y_pred    = MODEL(x)
 					y_pred    = MODEL(*x)
 					if y.shape!=y_pred.shape and epoch==0:
-						print("Warning: "+str(y.shape)+" not equal to "+str(y_pred.shape))
+						print("Warning: target shape "+str(y.shape)+" not equal to output shape "+str(y_pred.shape))
 					# if not isinstance(loss_fn, torch.nn.CrossEntropyLoss):
 					# 	assert y.shape==y_pred.shape, str(y.shape)+" not equal to "+str(y_pred.shape)
 					loss[key] = loss_fn( y_pred, y )
@@ -210,8 +210,28 @@ def train(model,optimizer,num_epochs,dataset,val_dataset,batch_size,loss_fn,accu
 				loss_sum, reg_loss_sum, acc_sum, reg_loss = eval_loss_acc()
 			else:
 				loss_sum, reg_loss_sum, acc_sum, reg_loss = eval_loss_acc()
+				# print("^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
+				# print("Before loss_sum")
+				# for key, MODEL in model.items():
+				# 	for name, param in MODEL.named_parameters():
+				# 		print(name, param.grad)
+				# print("^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n")
+				# loss_sum.backward()
+				# print("\n^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
+				# print("After loss_sum")
+				# for key, MODEL in model.items():
+				# 	for name, param in MODEL.named_parameters():
+				# 		print(name, param.grad)
+				# print("\n^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n")
+				# reg_loss_sum.backward()
+				# print("After reg_loss_sum")
+				# for key, MODEL in model.items():
+				# 	for name, param in MODEL.named_parameters():
+				# 		print(name, param.grad)
+				# print("^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n")
 				(loss_sum+reg_loss_sum).backward()
 				optimizer.step()
+				# exit()
 			# torch.nn.utils.clip_grad_value_(model.parameters(), 10)
 			# torch.nn.utils.clip_grad_norm_(model.parameters(), 1000, 'inf')
 
@@ -476,7 +496,7 @@ def jacobian(output, input, create_graph=False):
 	jacobian = []
 
 	Id = torch.zeros(*output.shape).to(input.device)
-	for i in range(input.numel()):
+	for i in range(output.numel()):
 		Id.data.flatten()[i] = 1.0
 
 		jac_i = torch.autograd.grad(
