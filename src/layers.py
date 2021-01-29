@@ -1,5 +1,6 @@
 import time
 import math
+import warnings
 import numpy as np
 import scipy.linalg as la
 import scipy.sparse.linalg as sla
@@ -16,7 +17,12 @@ from torch.nn.functional import linear, conv2d, conv_transpose2d
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.tensorboard import SummaryWriter
 
+from collections import deque
+
 from . import utils
+from .utilities import spectral_norm
+from .solvers.linear    import linsolve
+from .solvers.nonlinear import nsolve
 # from . import utils
 # from jacobian import JacobianReg
 # print(dir(utils))
@@ -29,18 +35,27 @@ from . import utils
 
 # global parameters
 _TOL = 1.e-6
-_linTOL = 1.e-5
+# _linTOL = 1.e-6
 _max_iters = 200
+_max_lin_iters = 10
+_nsolver    = 'lbfgs'
+_lin_solver = 'gmres' #scipy_lgmres
 
 _collect_stat  = True
 _forward_stat  = {}
 _backward_stat = {}
 
+
+_debug = False
+
 # _dtype  = torch.float
 # _device = torch.device("cpu")
 
-_forward_scipy  = False
-_backward_scipy = False
+# _forward_scipy  = False
+# _backward_scipy = False
+
+# _linear_solver = 'native_gmres'
+# _linear_solver = 'scipy_lgmres'
 
 # _to_numpy = lambda x, dtype: x.cpu().detach().numpy().astype(dtype)
 
@@ -49,128 +64,156 @@ _backward_scipy = False
 ###############################################################################
 
 
-# class neumann_backprop(Function):
-# 	@staticmethod
-# 	def forward(ctx, y, y_fp):
-# 		# ctx.obj = obj
-# 		ctx.save_for_backward(y, y_fp)
-# 		return y
-
-# 	@staticmethod
-# 	def backward(ctx, dy):
-# 		y, y_fp, = ctx.saved_tensors
-
-# 		# residual = lambda dx: (dx-A_dot(dx)-dy).flatten().norm() # \| (I-A) * dx - dy \|
-# 		A_dot    = lambda x: torch.autograd.grad(y_fp, y, grad_outputs=x, retain_graph=True, only_inputs=True)[0]
-# 		residual = lambda Adx: (Adx-dy).reshape((dy.size()[0],-1)).norm(dim=1).max() #.flatten().norm() # \| (I-A) * dx - dy \|
-
-# 		tol = atol = torch.tensor(_TOL)
-# 		TOL = torch.max(tol*dy.norm(), atol)
-
-# 		#######################################################################
-# 		# Neumann series
-
-# 		dx  = dy
-# 		Ady = A_dot(dy)
-# 		Adx = Ady
-# 		r1  = residual(dx-Adx)
-# 		neu_iters = 1
-# 		while r1>=TOL and neu_iters<_max_iters:
-# 			r0  = r1
-# 			dx  = dx + Ady
-# 			Ady = A_dot(Ady)
-# 			Adx = Adx + Ady
-# 			r1  = residual(dx-Adx)
-# 			neu_iters += 1
-# 			assert r1<r0, "Neumann series hasn't converged at iteration "+str(neu_iters)+" out of "+str(_max_iters)+" max iterations"
-
-# 		if _collect_stat:
-# 			global _backward_stat
-# 			_backward_stat['steps']        = _backward_stat.get('steps',0) + 1
-# 			_backward_stat['neu_residual'] = _backward_stat.get('neu_residual',0) + r1
-# 			_backward_stat['neu_iters']    = _backward_stat.get('neu_iters',0) + neu_iters
-# 		return None, dx
-
-
-
 class linsolve_backprop(Function):
 	@staticmethod
-	def forward(ctx, self, y, y_fp, y_fp2):
+	def forward(ctx, self, y, fpx, fpy):
 		ctx.mark_non_differentiable(y)
-		ctx.save_for_backward(y, y_fp2)
+		ctx.save_for_backward(y, fpy)
 		ctx.self = self
-		return y_fp
+		return fpx
 
 	@staticmethod
 	def backward(ctx, dy):
-		y, y_fp, = ctx.saved_tensors
-		ndof  = y.nelement()
-		batch_dim = dy.size()[0]
-
-		ctx.residual  = 1
-		ctx.lin_iters = 0
-
-		# freeze parameters so that .backward() does not propagate corresponding gradients
-		ctx.self.rhs.requires_grad_(False)
+		y, y_fp,  = ctx.saved_tensors
+		batch_dim = dy.size(0)
 
 		start = time.time()
-		if _backward_scipy:
-			tol = atol = torch.tensor(_linTOL)
-			TOL = torch.max(tol*dy.norm(), atol)
 
-			A_dot       = lambda x: torch.autograd.grad(y_fp, y, grad_outputs=x, create_graph=False, retain_graph=True, only_inputs=True)[0]
-			residual_fn = lambda Adx: (Adx-dy).reshape((dy.size(0),-1)).norm(dim=1).max() # \| (I-A) * dx - dy \|
+		# for name, param in ctx.self.named_parameters():
+		# 	print(name, param.grad)
+		# print("---------------------")
+		if _debug:
+			pre_grad = {}
+			for name, param in ctx.self.named_parameters():
+				pre_grad[name] = param.grad
 
-			#######################################################################
+		# 'Matrix-vector' product of the linear operator
+		def matvec(v):
+			v0 = v.view_as(y)
+			# Av = v0 - torch.autograd.grad(y_fp, y, grad_outputs=v0, create_graph=True,  retain_graph=True, only_inputs=True)[0] # for LBFGS
+			Av = v0 - torch.autograd.grad(y_fp, y, grad_outputs=v0, create_graph=False, retain_graph=True, only_inputs=True)[0]
+			return Av.reshape((batch_dim,-1))
 
-			# torch to numpy dtypes
-			numpy_dtype = {torch.float: np.float, torch.float32: np.float32, torch.float64: np.float64}
+		dx, error, lin_iters, flag = linsolve( matvec, dy.reshape((batch_dim,-1)), dy.reshape((batch_dim,-1)), _lin_solver, max_iters=_max_lin_iters)
+		dx = dx.view_as(dy)
 
-			# 'Matrix-vector' product of the linear operator
-			def matvec(v):
-				ctx.lin_iters = ctx.lin_iters + 1
-				v0 = torch.from_numpy(v).view_as(y).to(device=dy.device, dtype=dy.dtype)
-				Av = v0 - A_dot(v0)
-				return Av.cpu().detach().numpy().ravel()
-			A = sla.LinearOperator(dtype=numpy_dtype[dy.dtype], shape=(ndof,ndof), matvec=matvec)
+		assert not torch.isnan(error), "NaN value in the error of the linear solver for layer %s at t=%d"%(_nsolver, self.name, t)
+		if _debug:
+			resid1 = matvec(dy).sum()
+			resid2 = matvec(dy).sum()
+			assert resid1==resid2, "spectral normalization not frozen in backprop, delta_residual=%.2e"%((resid1-resid2).abs()) #.item())
+			for name, param in ctx.self.named_parameters():
+				# print(name, param.grad)
+				assert param.grad is None or (param.grad-pre_grad[name]).sum()==0, "linsolver propagated gradients to parameters"
+				# assert param.grad is None or param.grad.sum()==0, "linsolver propagated gradients to parameters"
+		# print(ctx.self.rhs)
+		# print("+++++++++++++++++++++++")
+		# exit()
+		if flag>0: warnings.warn("%s in backprop didn't converge for layer %s, error is %.2E"%(_lin_solver, ctx.self.name, error)) #.item()))
 
 
-			# Note that norm(residual) <= max(tol*norm(b), atol. See https://docs.scipy.org/doc/scipy/reference/generated/scipy.sparse.linalg.lgmres.html
-			dx, info = sla.lgmres( A, dy.cpu().detach().numpy().ravel(), x0=dy.cpu().detach().numpy().ravel(), maxiter=_max_iters, tol=TOL, atol=atol, M=None )
-			dx = torch.from_numpy(dx).view_as(dy).to(device=dy.device, dtype=dy.dtype)
+		# if _linear_solver=='native_gmres':
+		# 	# 'Matrix-vector' product of the linear operator
+		# 	def matvec(v):
+		# 		v0 = v.view_as(y)
+		# 		Av = v0 - torch.autograd.grad(y_fp, y, grad_outputs=v0, create_graph=False, retain_graph=True, only_inputs=True)[0]
+		# 		return Av.reshape((batch_dim,-1))
 
-			ctx.residual = residual_fn(dx-A_dot(dx)).detach()
-		else:
-			A_dot = lambda x: torch.autograd.grad(y_fp, y, grad_outputs=x, create_graph=True, only_inputs=True)[0] # need create_graph to find it's derivative
+		# 	# dx, error, lin_iters, flag = gmres( matvec, dy.reshape((batch_dim,-1)), dy.reshape((batch_dim,-1)), restrt=20, max_it=_max_iters, tol=_linTOL )
+		# 	dx, error, lin_iters, flag = linsolve( matvec, dy.reshape((batch_dim,-1)), dy.reshape((batch_dim,-1)), 'gmres' )
+		# 	dx = dx.view_as(dy)
 
-			# initial condition
-			dx = dy.clone().detach().requires_grad_(True)
+		# 	if flag>0:
+		# 		warnings.warn("Convergence of the linear solver in backprop is not achieved for %s, error is %.2E"%(ctx.self.name, error.item()))
+		# elif _linear_solver=='scipy_lgmres':
+		# 	tol = atol = torch.tensor(_linTOL)
+		# 	TOL = torch.max(tol*dy.norm(), atol)
 
-			nsolver = torch.optim.LBFGS([dx], lr=1, max_iter=_max_iters, max_eval=None, tolerance_grad=1.e-9, tolerance_change=1.e-9, history_size=5, line_search_fn='strong_wolfe')
-			def closure():
-				nsolver.zero_grad()
-				residual = ( dx - A_dot(dx) - dy ).pow(2).sum() / batch_dim
-				if residual>_linTOL**2:
-				# if residual>_linTOL:
-					residual.backward(retain_graph=True)
-				ctx.residual = torch.sqrt(residual)
-				ctx.lin_iters += 1
-				return ctx.residual
-			nsolver.step(closure)
-			dx = dx.detach()
+		# 	A_dot       = lambda x: torch.autograd.grad(y_fp, y, grad_outputs=x, create_graph=False, retain_graph=True, only_inputs=True)[0]
+		# 	residual_fn = lambda Adx: (Adx-dy).reshape((dy.size(0),-1)).norm(dim=1).max() # \| (I-A) * dx - dy \|
+
+		# 	#######################################################################
+
+		# 	# torch to numpy dtypes
+		# 	numpy_dtype = {torch.float: np.float, torch.float32: np.float32, torch.float64: np.float64}
+
+		# 	# 'Matrix-vector' product of the linear operator
+		# 	def matvec(v):
+		# 		ctx.lin_iters = ctx.lin_iters + 1
+		# 		v0 = torch.from_numpy(v).view_as(y).to(device=dy.device, dtype=dy.dtype)
+		# 		Av = v0 - A_dot(v0)
+		# 		return Av.cpu().detach().numpy().ravel()
+		# 	A = sla.LinearOperator(dtype=numpy_dtype[dy.dtype], shape=(ndof,ndof), matvec=matvec)
+
+
+		# 	# Note that norm(residual) <= max(tol*norm(b), atol. See https://docs.scipy.org/doc/scipy/reference/generated/scipy.sparse.linalg.lgmres.html
+		# 	dx, info = sla.lgmres( A, dy.cpu().detach().numpy().ravel(), x0=dy.cpu().detach().numpy().ravel(), maxiter=_max_iters, tol=TOL, atol=atol, M=None )
+		# 	dx = torch.from_numpy(dx).view_as(dy).to(device=dy.device, dtype=dy.dtype)
+
+		# 	ctx.residual = residual_fn(dx-A_dot(dx)).detach()
+
+		# # if _backward_scipy:
+		# # 	tol = atol = torch.tensor(_linTOL)
+		# # 	TOL = torch.max(tol*dy.norm(), atol)
+
+		# # 	A_dot       = lambda x: torch.autograd.grad(y_fp, y, grad_outputs=x, create_graph=False, retain_graph=True, only_inputs=True)[0]
+		# # 	residual_fn = lambda Adx: (Adx-dy).reshape((dy.size(0),-1)).norm(dim=1).max() # \| (I-A) * dx - dy \|
+
+		# # 	#######################################################################
+
+		# # 	# torch to numpy dtypes
+		# # 	numpy_dtype = {torch.float: np.float, torch.float32: np.float32, torch.float64: np.float64}
+
+		# # 	# 'Matrix-vector' product of the linear operator
+		# # 	def matvec(v):
+		# # 		ctx.lin_iters = ctx.lin_iters + 1
+		# # 		v0 = torch.from_numpy(v).view_as(y).to(device=dy.device, dtype=dy.dtype)
+		# # 		Av = v0 - A_dot(v0)
+		# # 		return Av.cpu().detach().numpy().ravel()
+		# # 	A = sla.LinearOperator(dtype=numpy_dtype[dy.dtype], shape=(ndof,ndof), matvec=matvec)
+
+
+		# # 	# Note that norm(residual) <= max(tol*norm(b), atol. See https://docs.scipy.org/doc/scipy/reference/generated/scipy.sparse.linalg.lgmres.html
+		# # 	dx, info = sla.lgmres( A, dy.cpu().detach().numpy().ravel(), x0=dy.cpu().detach().numpy().ravel(), maxiter=_max_iters, tol=TOL, atol=atol, M=None )
+		# # 	dx = torch.from_numpy(dx).view_as(dy).to(device=dy.device, dtype=dy.dtype)
+
+		# # 	ctx.residual = residual_fn(dx-A_dot(dx)).detach()
+		# else:
+		# 	# freeze parameters so that .backward() does not propagate corresponding gradients
+		# 	ctx.self.rhs.requires_grad_(False)
+
+		# 	A_dot = lambda x: torch.autograd.grad(y_fp, y, grad_outputs=x, create_graph=True, only_inputs=True)[0] # need create_graph to find it's derivative
+
+		# 	# initial condition
+		# 	dx = dy.clone().detach().requires_grad_(True)
+
+		# 	nsolver = torch.optim.LBFGS([dx], lr=1, max_iter=_max_iters, max_eval=None, tolerance_grad=1.e-9, tolerance_change=1.e-9, history_size=5, line_search_fn='strong_wolfe')
+		# 	def closure():
+		# 		nsolver.zero_grad()
+		# 		residual = ( dx - A_dot(dx) - dy ).pow(2).sum() / batch_dim
+		# 		if residual>_linTOL**2:
+		# 		# if residual>_linTOL:
+		# 			residual.backward(retain_graph=True)
+		# 		ctx.residual = torch.sqrt(residual)
+		# 		ctx.lin_iters += 1
+		# 		return ctx.residual
+		# 	nsolver.step(closure)
+		# 	dx = dx.detach()
+
+		# 	# unfreeze parameters
+		# 	ctx.self.rhs.requires_grad_(True)
+
 		stop = time.time()
 
-		# unfreeze parameters
-		ctx.self.rhs.requires_grad_(True)
 
 		if _collect_stat:
 			ctx.self._stat['backward/steps']        = ctx.self._stat.get('backward/steps',0)        + 1
 			ctx.self._stat['backward/walltime']     = ctx.self._stat.get('backward/walltime',0)     + (stop-start)
-			ctx.self._stat['backward/lin_residual'] = ctx.self._stat.get('backward/lin_residual',0) + ctx.residual if isinstance(ctx.residual,int) else ctx.residual.detach() #(dx-A_dot(dx))
-			ctx.self._stat['backward/lin_iters']    = ctx.self._stat.get('backward/lin_iters',0)    + ctx.lin_iters
+			ctx.self._stat['backward/lin_residual'] = ctx.self._stat.get('backward/lin_residual',0) + error #ctx.residual if isinstance(ctx.residual,int) else ctx.residual.detach() #(dx-A_dot(dx))
+			ctx.self._stat['backward/lin_iters']    = ctx.self._stat.get('backward/lin_iters',0)    + lin_iters
 
-		ctx.residual  = 0
-		ctx.lin_iters = 0
+		# ctx.residual  = 0
+		# ctx.lin_iters = 0
 		return None, None, dx, None
 
 
@@ -194,7 +237,7 @@ class ode_solver(Module, metaclass=ABCMeta):
 
 	@property
 	def num_steps(self):
-		return self._num_steps.item()
+		return self._num_steps #.item()
 	@num_steps.setter
 	def num_steps(self, num_steps):
 		self._num_steps.fill_(num_steps)
@@ -202,7 +245,7 @@ class ode_solver(Module, metaclass=ABCMeta):
 
 	@property
 	def T(self):
-		return self._T.item()
+		return self._T #.item()
 	@T.setter
 	def T(self, T):
 		self._T.fill_(T)
@@ -210,7 +253,7 @@ class ode_solver(Module, metaclass=ABCMeta):
 
 	@property
 	def h(self):
-		return self._h.item()
+		return self._h #.item()
 
 	########################################
 
@@ -248,76 +291,91 @@ class ode_solver(Module, metaclass=ABCMeta):
 	def ode_step(self, t0, x, param=None):
 		pass
 
-	def nsolve(self, fun, y, tol):
-		iters = [0]
-		resid = [0]
+	# def nsolve(self, fun, y, tol):
+	# 	iters = [0]
+	# 	resid = [0]
 
-		# if _forward_scipy: # use SciPy solver
+	# 	# if _forward_scipy: # use SciPy solver
 
-		# 	def functional(z):
-		# 		z0   = torch.from_numpy(z).view_as(x).to(device=y.device,dtype=y.dtype).requires_grad_(True)
-		# 		fun  = residual_fun(z0)
-		# 		print(fun)
-		# 		dfun = torch.autograd.grad(fun, z0)[0] # no retain_graph because derivative through nonlinearity is different at each iteration
-		# 		return fun.cpu().detach().numpy().astype(np.double), dfun.cpu().detach().numpy().ravel().astype(np.double)
-		# 	# opt_res = opt.minimize(functional, x.cpu().detach().numpy(), method='CG', jac=True, tol=_TOL, options={'maxiter': _max_iters,'disp': False})
-		# 	opt_res = opt.minimize(functional, y.cpu().detach().numpy(), method='L-BFGS-B', jac=True, tol=_TOL, options={'maxiter': _max_iters,'disp': False})
+	# 	# 	def functional(z):
+	# 	# 		z0   = torch.from_numpy(z).view_as(x).to(device=y.device,dtype=y.dtype).requires_grad_(True)
+	# 	# 		fun  = residual_fun(z0)
+	# 	# 		print(fun)
+	# 	# 		dfun = torch.autograd.grad(fun, z0)[0] # no retain_graph because derivative through nonlinearity is different at each iteration
+	# 	# 		return fun.cpu().detach().numpy().astype(np.double), dfun.cpu().detach().numpy().ravel().astype(np.double)
+	# 	# 	# opt_res = opt.minimize(functional, x.cpu().detach().numpy(), method='CG', jac=True, tol=_TOL, options={'maxiter': _max_iters,'disp': False})
+	# 	# 	opt_res = opt.minimize(functional, y.cpu().detach().numpy(), method='L-BFGS-B', jac=True, tol=_TOL, options={'maxiter': _max_iters,'disp': False})
 
-		# 	y = torch.from_numpy(opt_res.x).view_as(x).to(device=y.device,dtype=y.dtype)
-		# 	residual[0] = torch.tensor(opt_res.fun).to(device=y.device,dtype=y.dtype)
-		# 	cg_iters[0], success = opt_res.nit, opt_res.success
+	# 	# 	y = torch.from_numpy(opt_res.x).view_as(x).to(device=y.device,dtype=y.dtype)
+	# 	# 	residual[0] = torch.tensor(opt_res.fun).to(device=y.device,dtype=y.dtype)
+	# 	# 	cg_iters[0], success = opt_res.nit, opt_res.success
 
-		# 	# assert success, "CG solver hasn't converged with residual "+str(r.detach().numpy())+" at iteration "+str(cg_iters)+" out of "+str(_max_iters)+" max iterations"
-		# 	# assert r<=1.e-3, "CG solver hasn't converged with residual "+str(r.detach().numpy())+" after "+str(cg_iters)+" iterations"
+	# 	# 	# assert success, "CG solver hasn't converged with residual "+str(r.detach().numpy())+" at iteration "+str(cg_iters)+" out of "+str(_max_iters)+" max iterations"
+	# 	# 	# assert r<=1.e-3, "CG solver hasn't converged with residual "+str(r.detach().numpy())+" after "+str(cg_iters)+" iterations"
 
-		# 	if self.training:
-		# 		y_fp = fixed_point_map(y.requires_grad_(True)) # required_grad_(True) to compute Jacobian in linsolve_backprop
-		# 		y    = linsolve_backprop.apply(self, y, y_fp)
+	# 	# 	if self.training:
+	# 	# 		y_fp = fixed_point_map(y.requires_grad_(True)) # required_grad_(True) to compute Jacobian in linsolve_backprop
+	# 	# 		y    = linsolve_backprop.apply(self, y, y_fp)
 
-		# 	# print(residual[0])
-		# 	# print('-------------')
-		# 	# exit()
-
-
-		# assert False, "torch.enable_grad is required here"
+	# 	# 	# print(residual[0])
+	# 	# 	# print('-------------')
+	# 	# 	# exit()
 
 
-		# check initial residual and, as a side effect, perform spectral normalization
-		init_resid = fun(y)
-		if init_resid<tol:
-			return y.detach(), {'iters': 0, 'residual': init_resid.detach()}
+	# 	# assert False, "torch.enable_grad is required here"
 
-		# self.rhs.eval()					# freeze spectral normalization
-		self.rhs.requires_grad_(False)	# freeze parameters
 
-		# NOTE: in torch.optim.LBFGS, all norms are max norms hence no need to account for batch size in tolerance_grad & tolerance_change
-		nsolver = torch.optim.LBFGS([y], lr=1, max_iter=_max_iters, max_eval=None, tolerance_grad=1.e-9, tolerance_change=1.e-9, history_size=10, line_search_fn='strong_wolfe')
-		def closure():
-			iters[0] += 1
-			nsolver.zero_grad()
-			resid[0] = fun(y)
-			if resid[0]>tol: resid[0].backward()
-			# if resid[0]>tol**2: resid[0].backward()
-			# resid[0] = torch.sqrt(resid[0])
-			return resid[0]
-		nsolver.step(closure)
+	# 	# check initial residual and, as a side effect, perform spectral normalization
+	# 	init_resid = fun(y)
+	# 	if init_resid<tol:
+	# 		return y.detach(), {'iters': 0, 'residual': init_resid.detach()}
 
-		# TODO: what if some parameters need to have requires_grad=False?
-		self.rhs.requires_grad_(self.training)		# unfreeze parameters
-		# self.rhs.requires_grad_(True)		# unfreeze parameters
-		# self.rhs.train(mode=self.training)	# unfreeze spectral normalization
+	# 	# self.rhs.eval()					# freeze spectral normalization
+	# 	self.rhs.requires_grad_(False)	# freeze parameters
 
-		return y.detach().requires_grad_(True), {'iters': iters[0], 'residual': resid[0].detach()}
+	# 	# NOTE: in torch.optim.LBFGS, all norms are max norms hence no need to account for batch size in tolerance_grad & tolerance_change
+	# 	nsolver = torch.optim.LBFGS([y], lr=1, max_iter=_max_iters, max_eval=None, tolerance_grad=1.e-9, tolerance_change=1.e-9, history_size=10, line_search_fn='strong_wolfe')
+	# 	def closure():
+	# 		iters[0] += 1
+	# 		nsolver.zero_grad()
+	# 		resid[0] = fun(y)
+	# 		if resid[0]>tol: resid[0].backward()
+	# 		# if resid[0]>tol**2: resid[0].backward()
+	# 		# resid[0] = torch.sqrt(resid[0])
+	# 		return resid[0]
+	# 	nsolver.step(closure)
+
+	# 	# TODO: what if some parameters need to have requires_grad=False?
+	# 	self.rhs.requires_grad_(self.training)		# unfreeze parameters
+	# 	# self.rhs.requires_grad_(True)		# unfreeze parameters
+	# 	# self.rhs.train(mode=self.training)	# unfreeze spectral normalization
+
+	# 	return y.detach().requires_grad_(True), {'iters': iters[0], 'residual': resid[0].detach()}
 
 	########################################
 
-	# TODO: replace with generator
-	def forward(self, y0, t0=0, param=None):
-		y = [y0]
-		for step in range(self.num_steps):
-			t = t0 + step * self.h
-			y.append(self.ode_step(t, y[-1], param))
-		return torch.stack(y)
+	def trajectory(self, y0, t0=0):
+		return self.forward(y0, t0, evolution=True)
+
+	def forward(self, y0, t0=0, evolution=False):
+		if evolution:
+			y = deque([y0])
+			for step in range(self.num_steps):
+				t = t0 + step * self.h
+				y.append(self.ode_step(t, y[-1]))
+			return torch.stack(list(y))
+		else:
+			y = y0
+			for step in range(self.num_steps):
+				t = t0 + step * self.h
+				y = self.ode_step(t, y)
+			return y
+	# def forward(self, y0, t0=0, param=None):
+	# 	y = [y0]
+	# 	for step in range(self.num_steps):
+	# 		t = t0 + step * self.h
+	# 		y.append(self.ode_step(t, y[-1], param))
+	# 	return torch.stack(y)
 
 
 ###############################################################################################
@@ -334,7 +392,7 @@ class theta_solver(ode_solver):
 
 	@property
 	def theta(self):
-		return self._theta.item()
+		return self._theta #.item()
 	@theta.setter
 	def theta(self, theta):
 		self._theta.fill_(theta)
@@ -357,45 +415,51 @@ class theta_solver(ode_solver):
 		return self.h * self.rhs(t, z)
 
 
-	def residual(self, t, xval, fval=None, param=None):
-		x, y = xval
+	# def residual(self, t, xy, fval=None, param=None):
+	# 	x, y = xy
+	def residual(self, t, x, y, fval=None, param=None):
 		batch_dim = x.size(0)
-		return ( y - x - self.step_fun(t,x,y) ).pow(2).sum() / batch_dim
+		# return ( y - x - self.step_fun(t,x,y) ).pow(2).sum() / batch_dim
+		return ( y - x - self.step_fun(t,x,y) ).pow(2).reshape((batch_dim,-1)).sum(dim=1)
 
 
-	def ode_step(self, t, x, param=None):
-		res = {'iters': 0, 'residual': 0}
-		batch_dim = x.size(0)
-
-		residual_fn = lambda z: self.residual(t, [x.detach(),z])
+	def ode_step(self, t, x):
+		iters = resid = flag = 0
 
 		start = time.time()
 		if self.theta>0:
-			# initial condition: make new (that's why clone) leaf (that's why detach) node which requires gradient
-			y = x.clone().detach().requires_grad_(True)
+			residual_fn = lambda z: self.residual(t, x.detach(), z)
 
-			# residual of initial condition
-			init_resid = residual_fn(y).detach()
+			# check initial residual and, as a side effect, perform spectral normalization or other forward hooks
+			init_resid = residual_fn(x).amax().detach()
 
-			# spectral normalization has to be performed only once per forward pass
-			# It has been performed in nsolve, so freeze here
-			# self.rhs.eval()
-			if init_resid<self.tol:
-				res = {'iters': 0, 'residual': init_resid}
+			if init_resid<=self.tol:
+				y = x.detach()
 			else:
-				y, res = self.nsolve( residual_fn, y, self.tol )
+				# no need to freeze parameters, i.e. self.requires_grad_(False) as this should be taken care of in the nsolver
+				# spectral normalization has to be performed only once per forward pass, so freeze it here
+				self.rhs.eval() # note that self.training remains unchanged
 
-			# assert residual[0]<1.e-2, 'Error: divergence at t=%d, residual is %.2E'%(self.t, residual[0].detach().numpy())
-			if res['residual']>self.tol:
-				print('Warning: convergence not achieved for %s at t=%d, residual is %.2E'%(self.name, t, res['residual'].cpu().detach().numpy()))
+				# solve nonlinear system
+				y, resid, iters, flag = nsolve( residual_fn, x, _nsolver, tol=self.tol, max_iters=_max_iters )
+
+				# assert not torch.isnan(resid), "NaN value in the residual of the %s nsolver for layer %s at t=%d"%(_nsolver, self.name, t)
+				if _debug:
+					assert init_resid==residual_fn(x).amax().detach(), "spectral normalization not frozen, delta_residual=%.2e"%((init_resid-residual_fn(x).amax()).abs()) #.item())
+					if self.training:
+						for param in self.parameters():
+							assert param.grad is None or param.grad.sum()==0, "nsolver propagated gradients to parameters"
+
+				# unfreeze spectral normalization
+				self.rhs.train(mode=self.training)
+
+			if flag>0: warnings.warn("%s nonlinear solver didn't converge for layer %s at t=%d, error is %.2E"%(_nsolver, self.name, t, resid))
 
 			# NOTE: two evaluations of step_fun are requried anyway!
+			y.requires_grad_(True)
 			y = linsolve_backprop.apply(self, y, x + self.step_fun(t, x, y.detach()), self.step_fun(t, x.detach(), y))
-
-			# unfreeze spectral normalization
-			# self.rhs.train(mode=self.training)
 		else:
-			y = x + self.step_fun(t, x, x)
+			y = x + self.step_fun(t, x, None)
 		stop = time.time()
 
 		if _collect_stat:
@@ -403,8 +467,8 @@ class theta_solver(ode_solver):
 			#######################
 			self._stat[mode+'steps']    = self._stat.get(mode+'steps',0)    + 1
 			self._stat[mode+'walltime'] = self._stat.get(mode+'walltime',0) + (stop-start)
-			self._stat[mode+'iters']    = self._stat.get(mode+'iters',0)    + res['iters']
-			self._stat[mode+'residual'] = self._stat.get(mode+'residual',0) + res['residual']
+			self._stat[mode+'iters']    = self._stat.get(mode+'iters',0)    + iters
+			self._stat[mode+'residual'] = self._stat.get(mode+'residual',0) + resid
 		return y
 
 
@@ -449,9 +513,9 @@ class MLP(Module):
 
 		# spectral normalization
 		if power_iters>0:
-			linear_inp =   torch.nn.utils.spectral_norm( linear_inp, name='weight', n_power_iterations=power_iters, eps=1e-12, dim=None)
-			linear_hid = [ torch.nn.utils.spectral_norm( linear,     name='weight', n_power_iterations=power_iters, eps=1e-12, dim=None) for linear in linear_hid ]
-			linear_out =   torch.nn.utils.spectral_norm( linear_out, name='weight', n_power_iterations=power_iters, eps=1e-12, dim=None)
+			linear_inp =   spectral_norm( linear_inp, name='weight', input_shape=(in_dim,), n_power_iterations=power_iters, eps=1e-12, dim=None)
+			linear_hid = [ spectral_norm( linear,     name='weight', input_shape=(width,),  n_power_iterations=power_iters, eps=1e-12, dim=None) for linear in linear_hid ]
+			linear_out =   spectral_norm( linear_out, name='weight', input_shape=(width,),  n_power_iterations=power_iters, eps=1e-12, dim=None)
 
 		# Multilayer perceptron
 		net = [linear_inp] + [val for pair in zip([sigma1]*depth,linear_hid) for val in pair] + [sigma2,linear_out]
@@ -563,7 +627,7 @@ class ParabolicPerceptron(Module):
 
 		# spectral normalization
 		if power_iters>0:
-			torch.nn.utils.spectral_norm( self, name='weight', n_power_iterations=power_iters, eps=1e-12, dim=None)
+			spectral_norm( self, name='weight', input_shape=(dim,), n_power_iterations=power_iters, eps=1e-12, dim=None)
 
 	def forward(self, x):
 		return -torch.nn.functional.linear( self.sigma(torch.nn.functional.linear(x, self.weight, self.bias)), self.weight.t(), None )
@@ -595,8 +659,8 @@ class HamiltonianPerceptron(Module):
 
 		# spectral normalization
 		if power_iters>0:
-			torch.nn.utils.spectral_norm( self, name='weight1', n_power_iterations=power_iters, eps=1e-12, dim=None)
-			torch.nn.utils.spectral_norm( self, name='weight2', n_power_iterations=power_iters, eps=1e-12, dim=None)
+			spectral_norm( self, name='weight1', input_shape=(dim//2,), n_power_iterations=power_iters, eps=1e-12, dim=None)
+			spectral_norm( self, name='weight2', input_shape=(dim//2,), n_power_iterations=power_iters, eps=1e-12, dim=None)
 
 	def forward(self, x):
 		batch_dim, x_dim = x.shape
@@ -628,8 +692,10 @@ class LinearHyperbolic(torch.nn.Linear):
 ###############################################################################################
 
 class PreActConv2d(Module):
-	def __init__(self, channels, depth, kernel_size, activation='relu', power_iters=0):
+	def __init__(self, im_shape, depth, kernel_size, activation='relu', power_iters=0):
 		super().__init__()
+
+		channels = im_shape[0]
 
 		# activation function of hidden layers
 		sigma = choose_activation(activation)
@@ -639,7 +705,7 @@ class PreActConv2d(Module):
 
 		# spectral normalization
 		if power_iters>0:
-			conv_hid = [ torch.nn.utils.spectral_norm(conv, name='weight', n_power_iterations=power_iters, eps=1e-12, dim=None) for conv in conv_hid ]
+			conv_hid = [ spectral_norm(conv, name='weight', input_shape=im_shape, n_power_iterations=power_iters, eps=1e-12, dim=None) for conv in conv_hid ]
 
 		# normalization layers
 		# norm_hid = [ torch.nn.BatchNorm2d(channels) for _ in range(depth) ]
