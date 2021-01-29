@@ -5,6 +5,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from abc import ABCMeta, abstractmethod
 
 import argparse
+import yaml
 from random import randint
 import numpy as np
 import math
@@ -12,8 +13,9 @@ import math
 from pathlib import Path
 
 import torch
-import utils
-import layers
+from src import layers, utils
+# import utils
+# import layers
 
 
 
@@ -38,7 +40,10 @@ _collect_stat = True
 def parse_args():
 	parser = argparse.ArgumentParser()
 	####################
+	parser.add_argument("--optdir",   default="options.yml" )
+	####################
 	parser.add_argument("--prefix",   default=None )
+	parser.add_argument("--name",     default=None )
 	parser.add_argument("--mode",     type=str,   default="train", choices=["init", "train", "plot", "test"] )
 	parser.add_argument("--seed",     type=int,   default=randint(0,10000))
 	####################
@@ -55,20 +60,30 @@ def parse_args():
 	parser.add_argument("--depth",    type=int,   default=3   )
 	parser.add_argument("--sigma",    type=str,   default="relu", nargs='+', choices=["relu", "gelu", "celu", "tanh"])
 	# parser.add_argument("--sigma",    type=str,   default="relu", choices=["relu", "gelu", "celu", "tanh"])
+	####################
 	# rhs spectral properties
-	parser.add_argument("--scales",   type=str,   default="equal", choices=["equal", "learn"])
+	# parser.add_argument("--scales",   type=str,   default="equal", choices=["equal", "learn"])
 	parser.add_argument("--piters",   type=int,   default=0   )
-	parser.add_argument("--eigs",     type=float, default=[math.nan,math.nan], nargs='+')
+	parser.add_argument("--eiglim",   type=float, default=[0,0],   nargs='+')
+	parser.add_argument("--stablim",  type=float, default=[0,1.5], nargs='+')
+	parser.add_argument("--stabinit", type=float, default=0.75)
+	parser.add_argument("--eigscale", type=str,   default="fixed", choices=["fixed", "learn"])
+	parser.add_argument("--eigshift", type=str,   default="fixed", choices=["fixed", "learn"])
+	# parser.add_argument("--eigmap",   type=str,   default=None, choices=["shift", "rational"])
 	# parser.add_argument("--minrho",   type=float, default=0   )
 	# parser.add_argument("--maxrho",   type=float, default=-1  )
 	####################
-	# training params
+	# data params
 	parser.add_argument("--datasize",  type=int,   default=500 )
 	parser.add_argument("--datasteps", type=int,   default=-1  )
-	parser.add_argument("--batch",     type=int,   default=-1  )
+	parser.add_argument("--datanoise", type=str,   default="gaussian" )
+	parser.add_argument("--noisesize", type=float, default=0.0 )
+	####################
+	# training params
 	parser.add_argument("--init",      type=str,   default="rnd", choices=["init", "cont", "rnd", "zero"])
-	parser.add_argument("--epochs",    type=int,   default=1000)
 	parser.add_argument("--lr",        type=float, default=0.01)
+	parser.add_argument("--batch",     type=int,   default=-1  )
+	parser.add_argument("--epochs",    type=int,   default=1000)
 	####################
 	# regularizers
 	parser.add_argument("--wdecay", type=float, default=0   )
@@ -84,18 +99,31 @@ def parse_args():
 	# parser.add_argument("--ax",     type=float, default=0   )
 
 	args = parser.parse_args()
+	if os.path.exists(Path(args.optdir)):
+		with open(args.optdir, 'r') as f:
+			opts = yaml.load(f, Loader=yaml.Loader)
+			for key, value in opts.items():
+				args.__dict__[key] = value
+
 	if args.steps<=0:
 		assert int(args.T)==args.T
 		args.steps = int(args.T)
 	if args.datasteps<0:
 		del args.datasteps
 
+	assert args.eiglim[0]<=args.eiglim[1]
+	assert args.stablim[0]<args.stablim[1]
+	assert args.stabinit>=args.stablim[0] and args.stabinit<=args.stablim[1]
+	if args.theta>0:
+		assert args.stablim[0]>(args.theta-1)/args.theta, "lower bound of stability function for theta=%.2f should be greater than %.2e, got args.stablim[0] = %.2e"%(args.theta, (args.theta-1)/args.theta, args.stablim[0])
+	# assert args.stablim[1]>=1, "upper bound of stability function must be greater than 1, got args.stablim[1] = "+str(args.stablim[1])
 	return args
 
 
 
 def option_type(option):
 	opt2type = {'prefix': str,
+				'name': str,
 				'mode': str,
 				'seed': int,
 				'method': str,
@@ -141,10 +169,12 @@ def make_name(args, verbose=True):
 		length  = len(arg)
 		max_len = length if length>max_len else max_len
 	max_len += 1
+	ignore = ['prefix', 'sigma', 'mode', 'steps', 'eiglim', 'tol', 'ajdiag', 'diaval']
 	for arg, value in vars(args).items():
 		if value is not None:
 			if verbose: print("{0:>{length}}: {1}".format(arg,str(value),length=max_len))
-			if arg!='prefix' and arg!='sigma' and arg!='mode' and arg!='method' and arg!='steps' and arg!='eigs' and arg!='tol' and arg!='ajdiag' and arg!='diaval': # and arg!='minrho' and arg!='maxrho':
+			# if arg!='prefix' and arg!='sigma' and arg!='mode' and arg!='method' and arg!='steps' and arg!='eigs' and arg!='tol' and arg!='ajdiag' and arg!='diaval': # and arg!='minrho' and arg!='maxrho':
+			if arg not in ignore:
 				file_name += arg+opsep+str(value)+sep
 			if arg=='steps' and value>0:
 				file_name += arg+opsep+str(value)+sep
@@ -161,11 +191,11 @@ def make_name(args, verbose=True):
 			# 	file_name += ('theta_in' if args.method=='inner' else 'theta_out')+opsep+str(value)+sep
 	if args.piters>0:
 		# file_name += 'rho'+opsep+str(args.minrho)+opsep+str(args.maxrho)+sep
-		file_name += 'eigs'+opsep+str(args.eigs[0])+opsep+str(args.eigs[1])+sep
+		file_name += 'eiglim'+opsep+str(args.eiglim[0])+opsep+str(args.eiglim[1])+sep
 	if args.prefix is not None:
 		file_name = str(args.prefix) + file_name
 	if verbose: print("-------------------------------------------------------------------")
-	return file_name[:-len(sep)]
+	return args.name if args.name is not None else file_name[:-len(sep)]
 
 
 def get_options_from_name(name):
@@ -299,7 +329,7 @@ def load_model(model, args, device=_cpu, location=None):
 
 
 class rhs_base(torch.nn.Module, metaclass=ABCMeta):
-	def __init__(self, args):
+	def __init__(self, shape, args):
 		super().__init__()
 		self.args = args
 
@@ -315,31 +345,94 @@ class rhs_base(torch.nn.Module, metaclass=ABCMeta):
 		# self.maxrho   = 1./max(0.02,np.abs(self.args.theta-0.5)) if math.isnan(self.args.eigs[0]) else np.abs(self.args.eigs[0])
 		# self.maxrho  *= 0.5
 		# self.maxrho  += self.maxshift
+		# min_eig = -1./max(0.01,np.abs(args.theta-0.5)) if math.isnan(args.eigs[0]) else args.eigs[0]
 
-		min_eig = -1./max(0.01,np.abs(self.args.theta-0.5)) if math.isnan(self.args.eigs[0]) else self.args.eigs[0]
-		max_eig =  1./max(0.01,self.args.theta)             if math.isnan(self.args.eigs[1]) else self.args.eigs[1]
-		assert max_eig>min_eig
-		self.max_rho = (max_eig - min_eig) / 2
+		# if spectrum not given, stability function (1+(1-theta)*z)/(1-theta*z) should be in [-1,inf]
+		# min_eig = -1./max(0.1,0.5-args.theta) if math.isnan(args.eiglim[0]) else args.eiglim[0]
+		# if spectrum not given, stability function (1+(1-theta)*z)/(1-theta*z) should be in [0,inf]
+		# min_eig = -1./max(0.1,1-args.theta)   if math.isnan(args.eiglim[0]) else args.eiglim[0]
+		# min_eig = 1./min(1.0/args.eiglim[0],args.theta-1)
+		# max_eig = 1./max(0.1,args.theta)     if math.isnan(args.eiglim[1]) else args.eiglim[1]
 
-		if args.scales=='learn' and args.piters>0:
-			if self.max_rho>0:
-				initrho = 0.1*self.max_rho
-				self._scales = torch.nn.parameter.Parameter( np.log(initrho/(self.max_rho-initrho)) * self.ones_like_input(), requires_grad=True)
-			else:
-				self.register_buffer('_scales', torch.tensor([0.0], dtype=torch.float))
-			self.register_buffer('_eigshift', torch.tensor([(min_eig+max_eig)/2], dtype=torch.float))
+		# choose eiglims such that stability function (1+(1-theta)*z)/(1-theta*z) is in stablims
+		if args.eiglim[0]==args.eiglim[1]:
+			min_eig = max(-10, (1-args.stablim[0])/((1-args.stablim[0])*args.theta-1) )
+			max_eig = min( 10, (1-args.stablim[1])/((1-args.stablim[1])*args.theta-1) )
 		else:
-			self.register_buffer('_scales',   torch.tensor([1.0], dtype=torch.float))
-			self.register_buffer('_eigshift', torch.tensor([0.0], dtype=torch.float))
+			min_eig, max_eig = args.eiglim
+		assert max_eig>min_eig
+		# if not math.isnan(args.eiglim[0]): min_eig = max(min_eig, args.eiglim[0])
+		# if not math.isnan(args.eiglim[1]): max_eig = min(max_eig, args.eiglim[1])
+		# assert max_eig>min_eig
+
+		# if args.scales=='learn' and args.piters>0:
+		# 	if self.max_rho>0:
+		# 		initrho = 0.1*self.max_rho
+		# 		self._scales = torch.nn.parameter.Parameter( np.log(initrho/(self.max_rho-initrho)) * self.ones_like_input(), requires_grad=True)
+		# 	else:
+		# 		self.register_buffer('_scales', torch.tensor([0.0], dtype=torch.float))
+		# 	self.register_buffer('_eigshift', torch.tensor([(min_eig+max_eig)/2], dtype=torch.float))
+		# else:
+		# 	self.register_buffer('_scales',   torch.tensor([1.0], dtype=torch.float))
+		# 	self.register_buffer('_eigshift', torch.tensor([0.0], dtype=torch.float))
+
+		############################
+
+		self.shape = shape
+
+		self.eigscale = args.eigscale
+		self.eigshift = args.eigshift
+		# self.eigmap   = args.eigmap
+		self.eigmin   = min_eig
+		self.eigmax   = max_eig
+		self.eiginit  = (1-args.stabinit)/((1-args.stabinit)*args.theta-1)
+		# self.eigdif   = (max_eig - min_eig) / 2
+		# self.eigsum   = (max_eig + min_eig) / 2
+		# self.eigprod  =  min_eig * max_eig
+
+		# self.register_buffer('_eigmin', min_eig)
+		# self.register_buffer('_eigmax', max_eig)
+		# self.register_buffer('_eiginit', (1-args.stabinit)/((1-args.stabinit)*args.theta-1))
+
+		if self.eigscale=='learn':
+			assert args.piters>0, "if eigscale=='learn', spectral normalization should be performed and hence piters must be positive"
+			# initialize _scales so that sigmoid(_scales) = a
+			a = 0.5
+			self._scales = torch.nn.parameter.Parameter( np.log(a/(1-a)) * torch.ones(1,*shape), requires_grad=True)
+		else:
+			self.register_parameter('_scales', None)
+
+		if self.eigshift=='learn':
+			assert args.piters>0, "if eigshift=='learn', spectral normalization should be performed and hence piters must be positive"
+			# initialize _shifta, _shiftb so that sigmoid(_shifta) = sigmoid(_shiftb) = a
+			a = 0.1
+			self._shifta = torch.nn.parameter.Parameter( torch.tensor(np.log(a/(1-a))), requires_grad=True)
+			self._shiftb = torch.nn.parameter.Parameter( torch.tensor(np.log(a/(1-a))), requires_grad=True)
+		else:
+			self.register_parameter('_shifta', None)
+			self.register_parameter('_shiftb', None)
+
+		# if args.eigmap=='shift':
+		# 	self.register_buffer('_eigshift', torch.tensor((min_eig+max_eig)/2, dtype=torch.float))
+		# elif args.eigmap=='rational':
+		# 	a = min_eig + max_eig
+		# 	b = min_eig - max_eig
+		# 	self.eigmap = lambda x,F: 2*min_eig*max_eig*torch.sigmoid(self._scales)*F / (a*torch.sigmoid(self._scales)*F+b)
+
 		# elif args.scales=='equal':
 		# 	self._scales   = torch.tensor([1.0]) if math.isnan(self.args.eigs[0]) else torch.tensor([self.maxrho],   dtype=torch.float)
 		# 	self._eigshift = torch.tensor([0.0]) if math.isnan(self.args.eigs[1]) else torch.tensor([self.maxshift], dtype=torch.float)
 
 
+	# def scale(self, f):
+	# 	if self.eigscale=='learn':
+	# 		return torch.sigmoid(self._scales) * f
+	# 	else:
+	# 		return f
 
-	@abstractmethod
-	def ones_like_input(self):
-		pass
+	# @abstractmethod
+	# def ones_like_input(self):
+	# 	pass
 
 
 	def initialize(self):
@@ -354,7 +447,8 @@ class rhs_base(torch.nn.Module, metaclass=ABCMeta):
 				torch.nn.init.zeros_(weight)
 		# perform initial spectral normalization
 		if self.args.piters>0:
-			self.spectral_normalization(self.ones_like_input(), 10)
+			self.spectral_normalization(torch.ones(1,*self.shape), 10)
+			# self.spectral_normalization(self.ones_like_input(), 10)
 
 
 	# divergence and jacobian of the vector field
@@ -367,14 +461,12 @@ class rhs_base(torch.nn.Module, metaclass=ABCMeta):
 		# return self.jacdiagreg( self.F(t), y )
 		return self.jacdiagreg( lambda x: self.forward(t,x), y )
 
-
 	# # derivative of the tangential component in the tangential direction
 	# def Ftan(self, t, y):
 	# 	batch_dim = y.size(0)
 	# 	fun   = lambda z: self.F(t)(z).reshape((batch_dim,-1)).pow(2).sum(dim=1, keepdim=True)
 	# 	Fnorm = torch.clamp( self.F(t)(y).reshape((batch_dim,-1)).norm(dim=1, keepdim=True), min=1.e-16 )
 	# 	return 0.5 * (utils.directional_derivative( fun, y, F ) / Fnorm).sum() / batch_dim
-
 
 	@property
 	def regularizer(self):
@@ -389,24 +481,30 @@ class rhs_base(torch.nn.Module, metaclass=ABCMeta):
 		return reg
 
 
+	# @property
+	# def scales(self):
+	# 	return self._scales
+	# 	# if self.args.scales=='learn' and self.args.piters>0:
+	# 	# 	return self.max_rho * torch.sigmoid( self._scales )
+	# 	# 	# return self.maxrho * torch.sigmoid( self._scales )
+	# 	# 	# 0.5 because eigs of F(y)-y are in [-2,0]
+	# 	# else:
+	# 	# 	return self._scales
+
+
+	# @property
+	# def eigshift(self):
+	# 	return self._eigshift
+	# 	# if self.args.scales=='learn' and self.maxshift>0:
+	# 	# 	return self.maxshift * torch.sigmoid( self._eigshift )
+	# 	# else:
+	# 	# 	return self._eigshift
+
 	@property
-	def scales(self):
-		if self.args.scales=='learn' and self.args.piters>0:
-			return self.max_rho * torch.sigmoid( self._scales )
-			# return self.maxrho * torch.sigmoid( self._scales )
-			# 0.5 because eigs of F(y)-y are in [-2,0]
-		else:
-			return self._scales
-
-
-	@property
-	def eigshift(self):
-		return self._eigshift
-		# if self.args.scales=='learn' and self.maxshift>0:
-		# 	return self.maxshift * torch.sigmoid( self._eigshift )
-		# else:
-		# 	return self._eigshift
-
+	def spectrum_bounds(self):
+		a = self.eigmin if self._shifta is None else self.eiginit + torch.sigmoid(self._shifta)*(self.eigmin-self.eiginit)
+		b = self.eigmax if self._shiftb is None else self.eiginit + torch.sigmoid(self._shiftb)*(self.eigmax-self.eiginit)
+		return (a, b)
 
 	def spectral_normalization(self, y, iters=1):
 		if self.args.piters>0:
@@ -427,13 +525,35 @@ class rhs_base(torch.nn.Module, metaclass=ABCMeta):
 		else:
 			return 0
 
-	def spectrum(self, t, data):
-		data = torch.tensor(data).requires_grad_(True)
-		batch_dim = data.size(0)
-		data_dim  = data.numel() // batch_dim
-		jacobian  = utils.jacobian( self.forward(t,data), data, True ).reshape( batch_dim, data_dim, batch_dim, data_dim ).detach().numpy()
-		eigvals   = np.linalg.eigvals([ jacobian[i,:,i,:] for i in range(batch_dim) ]).reshape((-1,1))
-		return np.hstack(( np.real(eigvals), np.imag(eigvals) ))
+	def eigenvalues(self, t, data):
+		from src.utilities.spectral import eigenvalues
+		return eigenvalues( lambda x: self.forward(t,x), data)
+		# # with torch.enable_grad():
+		# data = torch.tensor(data).requires_grad_(True)
+		# batch_dim = data.size(0)
+		# data_dim  = data.numel() // batch_dim
+
+		# # import scipy.sparse.linalg as sla
+		# # from scipy.sparse.linalg import eigs, svds
+		# # # using scipy sparse LinearOperator
+		# # numpy_dtype = {torch.float: np.float, torch.float32: np.float32, torch.float64: np.float64}
+		# # # 'Matrix-vector' product of the linear operator
+		# # def matvec(v):
+		# # 	v0 = torch.from_numpy(v).view_as(data).to(device=data.device, dtype=data.dtype)
+		# # 	Av = torch.autograd.grad(self.forward(t,data), data, grad_outputs=v0, create_graph=False, retain_graph=True, only_inputs=True)[0]
+		# # 	return Av.cpu().detach().numpy().ravel()
+		# # A_dot = sla.LinearOperator(dtype=numpy_dtype[data.dtype], shape=(data.numel(),data.numel()), matvec=matvec)
+		# #
+		# # # using scipy sparse matrix
+		# # A_dot  = utils.jacobian( self.forward(t,data), data, True ).reshape( data.numel(),data.numel() ).cpu().detach().numpy()
+		# # eigvals  = eigs(A_dot, k=data.numel()-2, return_eigenvectors=False).reshape((-1,1))
+		# # singvals = svds(A_dot, k=5, return_singular_vectors=False)
+
+		# jacobian = utils.jacobian( self.forward(t,data), data, True ).reshape( batch_dim, data_dim, batch_dim, data_dim ).cpu().detach().numpy()
+		# eigvals  = np.linalg.eigvals([ jacobian[i,:,i,:] for i in range(batch_dim) ]).reshape((-1,1))
+		# # singvals = np.linalg.svd(jacobian.reshape( data.numel(),data.numel() ), compute_uv=False)
+		# # singvals = np.linalg.svd([ jacobian[i,:,i,:] for i in range(batch_dim) ], compute_uv=False)
+		# return np.hstack(( np.real(eigvals), np.imag(eigvals) ))
 
 
 	def forward(self, t, y, p=None):
@@ -443,9 +563,30 @@ class rhs_base(torch.nn.Module, metaclass=ABCMeta):
 		# else:
 		# 	alpha = 1 / (self.args.maxrho*th) - 1
 		# return self.scales * ( alpha * y + self.F(t)(y) )
-		ind = self.t2ind(t)
+		# ind = self.t2ind(t)
 		# return self.scales * (self.rhs[ind](y) - y) + self.eigshift * y
-		return self.scales * self.rhs[ind](y) + self._eigshift * y
+		# f = self.scale(self.rhs[ind](y))
+		# if self.eigmap is None:
+		# 	return f
+		# elif self.eigmap=="shift":
+		# 	return self.eigdif * f + self.eigsum * y
+
+		ind = self.t2ind(t)
+		f, a, b = self.rhs[ind](y), self.eigmin, self.eigmax
+
+		if self.eigscale=='learn':
+			f = torch.sigmoid(self._scales) * f
+		if self.eigshift=='learn':
+			a = self.eiginit + torch.sigmoid(self._shifta)*(self.eigmin-self.eiginit)
+			b = self.eiginit + torch.sigmoid(self._shiftb)*(self.eigmax-self.eiginit)
+		# if not self.training:
+		# 	print("%.2f(%.2f) %.2f(%.2f) %.2f %.2f"%(a.item(), self.eigmin, b.item(), self.eigmax, 1+a.item(),1+b.item()))
+		# m = 0.0
+		# if self.eigshift=='learn' and self.eigmin<-m and self.eigmax>m:
+		# 	a = -m + torch.sigmoid(self._shifta)*(self.eigmin+m)
+		# 	b =  m + torch.sigmoid(self._shiftb)*(self.eigmax-m)
+		return 0.5 * ((b-a)*f + (a+b)*y)
+
 
 
 
@@ -454,7 +595,7 @@ class rhs_mlp(rhs_base):
 	def __init__(self, data_dim, args, final_activation=None):
 		# dimension of the state space
 		self.dim = data_dim+args.codim
-		super().__init__(args)
+		super().__init__([shape,], args)
 
 		# activation
 		if len(args.sigma)==1:
@@ -489,22 +630,17 @@ class rhs_mlp(rhs_base):
 
 
 class rhs_conv2d(rhs_base):
-	def __init__(self, im_shape, args, kernel_size=3):
-		self.im_shape = im_shape
-		super().__init__(args)
+	def __init__(self, input_shape, kernel_size, depth, power_iters, args):
+		super().__init__(input_shape, args)
 
-		# depth of rhs
-		rhs_depth = args.steps if args.aTV>=0 else 1
+		self.shape = input_shape
 
 		# define rhs
-		self.rhs = torch.nn.ModuleList( [ layers.PreActConv2d(channels=im_shape[0], depth=args.depth, kernel_size=kernel_size, activation='relu', power_iters=args.piters) for _ in range(rhs_depth) ] )
+		self.rhs = torch.nn.ModuleList( [ layers.PreActConv2d(input_shape, depth=depth, kernel_size=kernel_size, activation='relu', power_iters=power_iters) for _ in range(depth) ] )
 
 		# intialize rhs
 		self.initialize()
 
-	def ones_like_input(self):
-		return torch.ones((1,*self.im_shape))
-
 
 
 
@@ -512,6 +648,13 @@ class rhs_conv2d(rhs_base):
 ###############################################################################
 ###############################################################################
 
+
+# def regularizers(solver, input, output):
+
+
+
+# def ode_block(solver, args):
+# 	solver.register_forward_hook()
 
 
 
@@ -521,12 +664,14 @@ class ode_block_base(torch.nn.Module):
 		super().__init__()
 		self.args = args
 
+	# def forward(self, y0, t0=0):
+	# 	return self.ode(y0, t0)
 	def forward(self, y0, t0=0, evolution=False):
-		if self.training and self.args.piters>0:
-			self.ode.rhs.spectral_normalization(y=y0)
-		self.ode.rhs.eval()
-		self.ode_out = self.ode(y0, t0)
-		self.ode.rhs.train(mode=self.training)
+		# if self.training and self.args.piters>0:
+		# 	self.ode.rhs.spectral_normalization(y=y0)
+		# self.ode.rhs.eval()
+		self.ode_out = self.ode(y0, t0, evolution=True)
+		# self.ode.rhs.train(mode=self.training)
 		return self.ode_out if evolution else self.ode_out[-1]
 
 	@property
@@ -539,7 +684,11 @@ class ode_block_base(torch.nn.Module):
 		# spectral normalization has to be performed only once per forward pass, so freeze here
 		rhs.eval()
 
-		p = 2
+		if args.aTV>0:
+			p = 2
+		else:
+			p = 0
+		# p = 2
 
 		# trapezoidal rule
 		y0, yT = self.ode_out[0].detach(), self.ode_out[-1].detach()
