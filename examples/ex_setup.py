@@ -12,8 +12,12 @@ import math
 
 from pathlib import Path
 
+from collections import deque
+
 import torch
 from src import layers, utils
+from src.utilities import calc
+from src.utilities import TraceJacobianReg
 # import utils
 # import layers
 
@@ -334,8 +338,8 @@ class rhs_base(torch.nn.Module, metaclass=ABCMeta):
 		self.args = args
 
 		# divergence and Jacobian regularizers
-		self.divjacreg  = utils.TraceJacobianReg(n=args.mciters)
-		self.jacdiagreg = utils.JacDiagReg(n=args.mciters, value=args.diaval)
+		# self.divjacreg  = TraceJacobianReg(n=args.mciters)
+		# self.jacdiagreg = utils.JacDiagReg(n=args.mciters, value=args.diaval)
 
 		###############################
 		# scales
@@ -436,7 +440,7 @@ class rhs_base(torch.nn.Module, metaclass=ABCMeta):
 
 
 	def initialize(self):
-		for name, weight in self.rhs.named_parameters():
+		for name, weight in self.F.named_parameters():
 			if 'weight' in name:
 				# torch.nn.init.xavier_normal_(weight, gain=1.e-1)
 				# torch.nn.init.xavier_normal_(weight)
@@ -452,14 +456,14 @@ class rhs_base(torch.nn.Module, metaclass=ABCMeta):
 
 
 	# divergence and jacobian of the vector field
-	def divjac(self, t, y):
-		# return self.divjacreg( self.F(t), y )
-		return self.divjacreg( lambda x: self.forward(t,x), y )
+	# def divjac(self, t, y):
+	# 	# return self.divjacreg( self.F(t), y )
+	# 	return self.divjacreg( lambda x: self.forward(t,x), y )
 
 	# divergence and jacobian of the vector field
-	def jacdiag(self, t, y):
-		# return self.jacdiagreg( self.F(t), y )
-		return self.jacdiagreg( lambda x: self.forward(t,x), y )
+	# def jacdiag(self, t, y):
+	# 	# return self.jacdiagreg( self.F(t), y )
+	# 	return self.jacdiagreg( lambda x: self.forward(t,x), y )
 
 	# # derivative of the tangential component in the tangential direction
 	# def Ftan(self, t, y):
@@ -468,17 +472,17 @@ class rhs_base(torch.nn.Module, metaclass=ABCMeta):
 	# 	Fnorm = torch.clamp( self.F(t)(y).reshape((batch_dim,-1)).norm(dim=1, keepdim=True), min=1.e-16 )
 	# 	return 0.5 * (utils.directional_derivative( fun, y, F ) / Fnorm).sum() / batch_dim
 
-	@property
-	def regularizer(self):
-		# Total variation like regularizer
-		reg = {}
-		if self.args.aTV<=0 or len(self.rhs)==1:
-			return reg
-		for t in range(len(self.rhs)-1):
-			for w2, w1 in zip(self.rhs[t+1].parameters(), self.rhs[t].parameters()):
-				reg['TV'] = reg.get('TV',0) + ( w2 - w1 ).pow(2).sum() #* (t+1)**2
-		reg['TV'] = (self.args.aTV / self.args.steps) * reg['TV']
-		return reg
+	# @property
+	# def regularizer(self):
+	# 	# Total variation like regularizer
+	# 	reg = {}
+	# 	if self.args.aTV<=0 or len(self.rhs)==1:
+	# 		return reg
+	# 	for t in range(len(self.rhs)-1):
+	# 		for w2, w1 in zip(self.rhs[t+1].parameters(), self.rhs[t].parameters()):
+	# 			reg['TV'] = reg.get('TV',0) + ( w2 - w1 ).pow(2).sum() #* (t+1)**2
+	# 	reg['TV'] = (self.args.aTV / self.args.steps) * reg['TV']
+	# 	return reg
 
 
 	# @property
@@ -509,8 +513,8 @@ class rhs_base(torch.nn.Module, metaclass=ABCMeta):
 	def spectral_normalization(self, y, iters=1):
 		if self.args.piters>0:
 			for _ in range(iters):
-				for t in range(len(self.rhs)):
-					self.rhs[t](y)
+				for t in range(len(self.F)):
+					self.F[t](y)
 					# self.rhs[t](torch.ones((1,self.dim)))
 
 
@@ -572,7 +576,7 @@ class rhs_base(torch.nn.Module, metaclass=ABCMeta):
 		# 	return self.eigdif * f + self.eigsum * y
 
 		ind = self.t2ind(t)
-		f, a, b = self.rhs[ind](y), self.eigmin, self.eigmax
+		f, a, b = self.F[ind](y), self.eigmin, self.eigmax
 
 		if self.eigscale=='learn':
 			f = torch.sigmoid(self._scales) * f
@@ -611,13 +615,13 @@ class rhs_mlp(rhs_base):
 		# structured rhs
 		structure = args.prefix if args.prefix is not None else 'mlp'
 		if structure=='par':
-			self.rhs = torch.nn.ModuleList( [ layers.ParabolicPerceptron( dim=self.dim, width=args.width, activation=sigma, power_iters=args.piters) for _ in range(rhs_depth) ] )
+			self.F = torch.nn.ModuleList( [ layers.ParabolicPerceptron( dim=self.dim, width=args.width, activation=sigma, power_iters=args.piters) for _ in range(rhs_depth) ] )
 		elif structure=='ham':
-			self.rhs = torch.nn.ModuleList( [ layers.HamiltonianPerceptron( dim=self.dim, width=args.width, activation=sigma, power_iters=args.piters) for _ in range(rhs_depth) ] )
+			self.F = torch.nn.ModuleList( [ layers.HamiltonianPerceptron( dim=self.dim, width=args.width, activation=sigma, power_iters=args.piters) for _ in range(rhs_depth) ] )
 		elif structure=='hol':
-			self.rhs = torch.nn.ModuleList( [ layers.HollowMLP(dim=self.dim, width=args.width, depth=args.depth, activation=sigma, final_activation=final_activation, power_iters=args.piters) for _ in range(rhs_depth) ] )
+			self.F = torch.nn.ModuleList( [ layers.HollowMLP(dim=self.dim, width=args.width, depth=args.depth, activation=sigma, final_activation=final_activation, power_iters=args.piters) for _ in range(rhs_depth) ] )
 		elif structure=='mlp':
-			self.rhs = torch.nn.ModuleList( [ layers.MLP(in_dim=self.dim, out_dim=self.dim, width=args.width, depth=args.depth, activation=sigma, final_activation=final_activation, power_iters=args.piters) for _ in range(rhs_depth) ] )
+			self.F = torch.nn.ModuleList( [ layers.MLP(in_dim=self.dim, out_dim=self.dim, width=args.width, depth=args.depth, activation=sigma, final_activation=final_activation, power_iters=args.piters) for _ in range(rhs_depth) ] )
 
 		# intialize rhs
 		self.initialize()
@@ -634,9 +638,10 @@ class rhs_conv2d(rhs_base):
 		super().__init__(input_shape, args)
 
 		self.shape = input_shape
+		self.depth = depth
 
 		# define rhs
-		self.rhs = torch.nn.ModuleList( [ layers.PreActConv2d(input_shape, depth=depth, kernel_size=kernel_size, activation='relu', power_iters=power_iters) for _ in range(depth) ] )
+		self.F = torch.nn.ModuleList( [ layers.PreActConv2d(input_shape, depth=depth, kernel_size=kernel_size, activation='relu', power_iters=power_iters) for _ in range(depth) ] )
 
 		# intialize rhs
 		self.initialize()
@@ -649,141 +654,248 @@ class rhs_conv2d(rhs_base):
 ###############################################################################
 
 
-# def regularizers(solver, input, output):
+def trapz(y, dx=1.0):
+	res = 0.5 * y[0]
+	for i in range(1,len(y)-1):
+		res = res + y[i]
+	res = res + 0.5 * y[-1]
+	return res * dx
 
 
+# forward hook to evaluate regularizers and statistics
+def compute_regularizers_and_statistics(solver, input, output):
+	reg   = {}
+	stat  = {}
+	if solver.training:
+		rhs   = solver.rhs
+		name  = solver.name+'_'
+		alpha = solver.alpha
 
-# def ode_block(solver, args):
-# 	solver.register_forward_hook()
-
-
-
-
-class ode_block_base(torch.nn.Module):
-	def __init__(self, args):
-		super().__init__()
-		self.args = args
-
-	# def forward(self, y0, t0=0):
-	# 	return self.ode(y0, t0)
-	def forward(self, y0, t0=0, evolution=False):
-		# if self.training and self.args.piters>0:
-		# 	self.ode.rhs.spectral_normalization(y=y0)
-		# self.ode.rhs.eval()
-		self.ode_out = self.ode(y0, t0, evolution=True)
-		# self.ode.rhs.train(mode=self.training)
-		return self.ode_out if evolution else self.ode_out[-1]
-
-	@property
-	def regularizer(self):
-		reg  = {}
-		rhs  = self.ode.rhs
-		name = self.ode.name+'_'
-		args = self.args
+		n     = len(solver._t)
+		steps = n - 1
+		dim   = input[0].numel() / input[0].size(0)
+		dx    = 1 / steps / dim
 
 		# spectral normalization has to be performed only once per forward pass, so freeze here
 		rhs.eval()
 
-		if args.aTV>0:
-			p = 2
-		else:
-			p = 0
-		# p = 2
+		# contribution of divergence along the trajectory
+		p = 2 if alpha['TV']>0 else 0
+		c = (((t+1)/n)**p for t in range(n))
 
-		# trapezoidal rule
-		y0, yT = self.ode_out[0].detach(), self.ode_out[-1].detach()
-		if args.adiv>0 or args.ajac>0:
-			div0, jac0 = rhs.divjac(0,y0)
-			divT, jacT = rhs.divjac(args.T,yT)
-			if args.adiv>0: reg[name+'div'] = 0.5 * ( div0/(args.steps+1)**p + divT)
-			if args.ajac>0: reg[name+'jac'] = 0.5 * ( jac0 + jacT )
-		if args.ajdiag>0: reg[name+'jdiag'] = 0.5 * ( rhs.jacdiag(0,y0) + rhs.jacdiag(args.T,yT) )
-		if args.af>0:     reg[name+'f']     = 0.5 * ( rhs(0,y0).pow(2).sum() + rhs(args.T,yT).pow(2).sum() )
-		# if args.atan!=0:  reg[name+'tan']   = 0.5 * ( rhs.Ftan(0,y0) + rhs.Ftan(args.T,yT) )
-		for t in range(1,args.steps):
-			y = self.ode_out[t].detach()
-			if args.adiv>0 or args.ajac>0:
-				divt, jact = rhs.divjac(t,y)
-				if args.adiv>0: reg[name+'div'] = reg[name+'div']   + ((t+1)/(args.steps+1))**p * divt #- ((args.atan * rhs.Ftan(t,y)) if args.atan>0 else 0)
-				if args.ajac>0: reg[name+'jac'] = reg[name+'jac']   + jact
-			if args.ajdiag>0: reg[name+'jdiag'] = reg[name+'jdiag'] + rhs.jacdiag(t,y)
-			if args.af>0:    reg[name+'f']      = reg[name+'f']     + rhs(t,y).pow(2).sum()
-			# if args.atan!=0: reg[name+'tan'] = reg[name+'tan'] + rhs.Ftan(t,y)
+		# evaluate divergence and jacobian along the trajectory
+		if alpha['div']!=0 or alpha['jac']!=0 or _collect_stat:
+			divjac = [ calc.trace_and_jacobian( lambda x: rhs(t, x), y) for t, y in zip(solver._t, solver._y) ]
 
-		dim = y0.numel() / y0.size(0)
-		if args.af>0:     reg[name+'f']     = (args.af     / args.steps / dim)    * reg[name+'f']
-		if args.ajac>0:   reg[name+'jac']   = (args.ajac   / args.steps / dim**2) * reg[name+'jac']
-		if args.adiv>0:   reg[name+'div']   = (args.adiv   / args.steps / dim)    * reg[name+'div'] #( reg[name+'div'] + (args.T * args.max_rho if args.power_iters>0 else 0) )
-		if args.ajdiag>0: reg[name+'jdiag'] = (args.ajdiag / args.steps / dim)    * reg[name+'jdiag']
-		# if args.atan!=0:  reg[name+'tan']   = (args.atan   / args.steps / dim)    * reg[name+'tan']
-
-		if args.aresid>0:
-			for step in range(args.steps):
-				x, y = self.ode_out[step].detach(), self.ode_out[step+1].detach()
-				reg[name+'residual'] = reg.get(name+'residual',0) + self.ode.residual(step, [x,y])
-			reg[name+'residual'] = (args.aresid / args.steps) * reg[name+'residual']
-
-		rhs.train(mode=self.training)
-
-		return reg
-
-	@property
-	def statistics(self):
-		stat = {}
 		if _collect_stat:
-			rhs  = self.ode.rhs
-			name = 'rhs/'+self.ode.name+'_'
-			args = self.args
+			stat['rhs/'+name+'div'] = trapz([divt[0] for divt in divjac], dx)
+			stat['rhs/'+name+'jac'] = trapz([jact[1] for jact in divjac], dx=dx/dim)
+			stat['rhs/'+name+'f']   = trapz([rhs(t,y).pow(2).sum() for t, y in zip(solver._t, solver._y)], dx)
 
-			# spectral normalization has to be performed only once per forward pass, so freeze here
-			rhs.eval()
+		# divergence
+		if alpha['div']!=0:
+			reg[name+'div'] = alpha['div'] * trapz([ct*divt[0] for ct, divt in zip(c, divjac)], dx)
 
-			# # trapezoidal rule
-			# y0, yT = self.ode_out[0], self.ode_out[-1]
-			# div0, jac0 = rhs.divjac(0,y0)
-			# divT, jacT = rhs.divjac(args.T,yT)
-			# stat[name+'div']   = 0.5 * ( div0 + divT)
-			# stat[name+'jdiag'] = 0.5 * ( rhs.jacdiag(0,y0) + rhs.jacdiag(args.T,yT) )
-			# stat[name+'jac']   = 0.5 * ( jac0 + jacT )
-			# stat[name+'f']     = 0.5 * ( rhs(0,y0).pow(2).sum() + rhs(args.T,yT).pow(2).sum() )
-			# for t in range(1,args.steps):
-			# 	y = self.ode_out[t]
-			# 	divt, jact = rhs.divjac(t,y)
-			# 	stat[name+'div']   = stat[name+'div']   + divt
-			# 	stat[name+'jdiag'] = stat[name+'jdiag'] + rhs.jacdiag(t,y)
-			# 	stat[name+'jac']   = stat[name+'jac']   + jact
-			# 	stat[name+'f']     = stat[name+'f']     + rhs(t,y).pow(2).sum()
+		# jacobian
+		if alpha['jac']!=0:
+			reg[name+'jac'] = alpha['jac'] * (stat['rhs/'+name+'jac'] if _collect_stat else trapz([jact[1] for jact in divjac], dx=dx/dim))
 
-			# dim = y0.numel() / y0.size(0)
-			# stat[name+'f']     = stat[name+'f']     / args.steps / dim
-			# stat[name+'jdiag'] = stat[name+'jdiag'] / args.steps / dim
-			# stat[name+'jac']   = stat[name+'jac']   / args.steps / dim**2
-			# stat[name+'div']   = stat[name+'div']   / args.steps / dim
-			# trapezoidal rule
-			y0, yT = self.ode_out[0].detach(), self.ode_out[-1].detach()
-			div0, jac0 = rhs.divjac(0,y0)
-			divT, jacT = rhs.divjac(args.T,yT)
-			stat[name+'div']   = 0.5 * ( div0 + divT)
-			# stat[name+'jdiag'] = 0.5 * ( rhs.jacdiag(0,y0) + rhs.jacdiag(args.T,yT) )
-			stat[name+'jac']   = 0.5 * ( jac0 + jacT )
-			stat[name+'f']     = 0.5 * ( rhs(0,y0).pow(2).sum() + rhs(args.T,yT).pow(2).sum() )
-			for t in range(1,args.steps):
-				y = self.ode_out[t].detach()
-				divt, jact = rhs.divjac(t,y)
-				stat[name+'div']   = stat[name+'div']   + divt
-				# stat[name+'jdiag'] = stat[name+'jdiag'] + rhs.jacdiag(t,y)
-				stat[name+'jac']   = stat[name+'jac']   + jact
-				stat[name+'f']     = stat[name+'f']     + rhs(t,y).pow(2).sum()
+		# magnitude
+		if alpha['f']!=0:
+			reg[name+'f'] = alpha['f'] * (stat['rhs/'+name+'f'] if _collect_stat else trapz([rhs(t,y).pow(2).sum() for t, y in zip(solver._t, solver._y)], dx))
 
-			dim = y0.numel() / y0.size(0)
-			stat[name+'f']     = stat[name+'f'].detach()     / args.steps / dim
-			# stat[name+'jdiag'] = stat[name+'jdiag'].detach() / args.steps / dim
-			stat[name+'jac']   = stat[name+'jac'].detach()   / args.steps / dim**2
-			stat[name+'div']   = stat[name+'div'].detach()   / args.steps / dim
+		# residual
+		if alpha['resid']!=0:
+			for step in range(n-1):
+				x, y = solver._y[step].detach(), solver._y[step+1].detach()
+				reg[name+'residual'] = reg.get(name+'residual',0) + solver.residual(solver._t[step], x, y)
+			reg[name+'residual'] = (alpha['resid'] / steps) * reg[name+'residual']
 
-			rhs.train(mode=self.training)
+		# 'Total variation'
+		if alpha['TV']!=0 and rhs.depth>1:
+			w1 = torch.nn.utils.parameters_to_vector(rhs.F[0].parameters())
+			for t in range(rhs.depth-1):
+				w2 = torch.nn.utils.parameters_to_vector(rhs.F[t+1].parameters())
+				reg[name+'TV'] = ( w2 - w1 ).pow(2).sum()
+				w1 = w2
+			reg[name+'TV'] = (alpha['TV'] / steps) * reg[name+'TV']
 
-		return stat
+		# note that solver.training has not been changed by rhs.eval()
+		rhs.train(mode=solver.training)
+
+		setattr(solver, 'regularizer', reg)
+		if _collect_stat:
+			setattr(rhs, 'statistics', stat)
+	return None
+
+
+def regularized_ode_solver(solver, args):
+	setattr(solver, 'alpha', {'div':args.adiv, 'jac':args.ajac, 'f':args.af, 'resid':args.aresid, 'TV':args.aTV})
+	solver.register_forward_hook(compute_regularizers_and_statistics)
+	return solver
+
+
+###############################################################################
+###############################################################################
+
+# class ode_block_base(torch.nn.Module):
+# 	def __init__(self, args):
+# 		super().__init__()
+# 		self.args = args
+# 		# setattr(self, 'alpha', {'div':args.adiv, 'jac':args.ajac, 'f':args.af, 'resid':args.aresid, 'TV':args.aTV})
+
+# 	# def forward(self, y0, t0=0):
+# 	# 	return self.ode(y0, t0)
+# 	# def forward(self, y0, t0=0, evolution=False):
+# 	# 	ode_out = self.ode(y0, t0, evolution=evolution)
+
+# 	# 	reg   = {}
+# 	# 	rhs   = self.ode.rhs
+# 	# 	name  = self.ode.name+'_'
+# 	# 	alpha = self.alpha
+
+# 	# 	n   = len(self.ode._t)
+# 	# 	dim = y0.numel() / y0.size(0)
+
+# 	# 	# spectral normalization has to be performed only once per forward pass, so freeze here
+# 	# 	rhs.eval()
+
+# 	# 	p = 2 if alpha['TV']>0 else 0
+# 	# 	c = [((t+1)/n)**p for t in range(n)]
+
+# 	# 	if alpha['div']!=0 or alpha['jac']!=0:
+# 	# 		divjac = [rhs.divjac(t, y.detach()) for t, y in zip(self.ode._t, self.ode._y)]
+
+# 	# 	# divergence regularizer
+# 	# 	if alpha['div']!=0:
+# 	# 		# reg[name+'div'] = alpha['div'] * trapz([ct*divt[0] for ct, divt in zip(c,divjac)], dx=1/(n-1)/dim)
+# 	# 		reg[name+'div'] = 0.5 * ( c[0]*divjac[0][0] + c[-1]*divjac[-1][0])
+# 	# 		for i in range(1,len(c)-1):
+# 	# 			reg[name+'div'] = reg[name+'div'] + c[i]*divjac[i][0]
+# 	# 		reg[name+'div'] = alpha['div'] *reg[name+'div']/(n-1)/dim
+
+# 	# 	rhs.train(mode=self.ode.training)
+# 	# 	setattr(self, 'regularizer', reg)
+
+# 	# 	return ode_out
+# 	def forward(self, y0, t0=0, evolution=False):
+# 		# if self.training and self.args.piters>0:
+# 		# 	self.ode.rhs.spectral_normalization(y=y0)
+# 		# self.ode.rhs.eval()
+# 		self.ode_out = self.ode(y0, t0, evolution=True)
+# 		# self.ode.rhs.train(mode=self.training)
+# 		return self.ode_out if evolution else self.ode_out[-1]
+
+# 	@property
+# 	def regularizer(self):
+# 		reg  = {}
+# 		rhs  = self.ode.rhs
+# 		name = self.ode.name+'_'
+# 		args = self.args
+
+# 		# spectral normalization has to be performed only once per forward pass, so freeze here
+# 		rhs.eval()
+
+# 		if args.aTV>0:
+# 			p = 2
+# 		else:
+# 			p = 0
+# 		# p = 2
+
+# 		# trapezoidal rule
+# 		y0, yT = self.ode_out[0].detach(), self.ode_out[-1].detach()
+# 		if args.adiv>0 or args.ajac>0:
+# 			div0, jac0 = rhs.divjac(0,y0)
+# 			divT, jacT = rhs.divjac(args.T,yT)
+# 			if args.adiv>0: reg[name+'div'] = 0.5 * ( div0/(args.steps+1)**p + divT)
+# 			if args.ajac>0: reg[name+'jac'] = 0.5 * ( jac0 + jacT )
+# 		if args.ajdiag>0: reg[name+'jdiag'] = 0.5 * ( rhs.jacdiag(0,y0) + rhs.jacdiag(args.T,yT) )
+# 		if args.af>0:     reg[name+'f']     = 0.5 * ( rhs(0,y0).pow(2).sum() + rhs(args.T,yT).pow(2).sum() )
+# 		# if args.atan!=0:  reg[name+'tan']   = 0.5 * ( rhs.Ftan(0,y0) + rhs.Ftan(args.T,yT) )
+# 		for t in range(1,args.steps):
+# 			y = self.ode_out[t].detach()
+# 			if args.adiv>0 or args.ajac>0:
+# 				divt, jact = rhs.divjac(t,y)
+# 				if args.adiv>0: reg[name+'div'] = reg[name+'div']   + ((t+1)/(args.steps+1))**p * divt #- ((args.atan * rhs.Ftan(t,y)) if args.atan>0 else 0)
+# 				if args.ajac>0: reg[name+'jac'] = reg[name+'jac']   + jact
+# 			if args.ajdiag>0: reg[name+'jdiag'] = reg[name+'jdiag'] + rhs.jacdiag(t,y)
+# 			if args.af>0:    reg[name+'f']      = reg[name+'f']     + rhs(t,y).pow(2).sum()
+# 			# if args.atan!=0: reg[name+'tan'] = reg[name+'tan'] + rhs.Ftan(t,y)
+
+# 		dim = y0.numel() / y0.size(0)
+# 		if args.af>0:     reg[name+'f']     = (args.af     / args.steps / dim)    * reg[name+'f']
+# 		if args.ajac>0:   reg[name+'jac']   = (args.ajac   / args.steps / dim**2) * reg[name+'jac']
+# 		if args.adiv>0:   reg[name+'div']   = (args.adiv   / args.steps / dim)    * reg[name+'div'] #( reg[name+'div'] + (args.T * args.max_rho if args.power_iters>0 else 0) )
+# 		if args.ajdiag>0: reg[name+'jdiag'] = (args.ajdiag / args.steps / dim)    * reg[name+'jdiag']
+# 		# if args.atan!=0:  reg[name+'tan']   = (args.atan   / args.steps / dim)    * reg[name+'tan']
+
+# 		if args.aresid>0:
+# 			for step in range(args.steps):
+# 				x, y = self.ode_out[step].detach(), self.ode_out[step+1].detach()
+# 				reg[name+'residual'] = reg.get(name+'residual',0) + self.ode.residual(step, [x,y])
+# 			reg[name+'residual'] = (args.aresid / args.steps) * reg[name+'residual']
+
+# 		rhs.train(mode=self.training)
+
+# 		return reg
+
+# 	@property
+# 	def statistics(self):
+# 		stat = {}
+# 		if _collect_stat:
+# 			rhs  = self.ode.rhs
+# 			name = 'rhs/'+self.ode.name+'_'
+# 			args = self.args
+
+# 			# spectral normalization has to be performed only once per forward pass, so freeze here
+# 			rhs.eval()
+
+# 			# # trapezoidal rule
+# 			# y0, yT = self.ode_out[0], self.ode_out[-1]
+# 			# div0, jac0 = rhs.divjac(0,y0)
+# 			# divT, jacT = rhs.divjac(args.T,yT)
+# 			# stat[name+'div']   = 0.5 * ( div0 + divT)
+# 			# stat[name+'jdiag'] = 0.5 * ( rhs.jacdiag(0,y0) + rhs.jacdiag(args.T,yT) )
+# 			# stat[name+'jac']   = 0.5 * ( jac0 + jacT )
+# 			# stat[name+'f']     = 0.5 * ( rhs(0,y0).pow(2).sum() + rhs(args.T,yT).pow(2).sum() )
+# 			# for t in range(1,args.steps):
+# 			# 	y = self.ode_out[t]
+# 			# 	divt, jact = rhs.divjac(t,y)
+# 			# 	stat[name+'div']   = stat[name+'div']   + divt
+# 			# 	stat[name+'jdiag'] = stat[name+'jdiag'] + rhs.jacdiag(t,y)
+# 			# 	stat[name+'jac']   = stat[name+'jac']   + jact
+# 			# 	stat[name+'f']     = stat[name+'f']     + rhs(t,y).pow(2).sum()
+
+# 			# dim = y0.numel() / y0.size(0)
+# 			# stat[name+'f']     = stat[name+'f']     / args.steps / dim
+# 			# stat[name+'jdiag'] = stat[name+'jdiag'] / args.steps / dim
+# 			# stat[name+'jac']   = stat[name+'jac']   / args.steps / dim**2
+# 			# stat[name+'div']   = stat[name+'div']   / args.steps / dim
+# 			# trapezoidal rule
+# 			y0, yT = self.ode_out[0].detach(), self.ode_out[-1].detach()
+# 			div0, jac0 = rhs.divjac(0,y0)
+# 			divT, jacT = rhs.divjac(args.T,yT)
+# 			stat[name+'div']   = 0.5 * ( div0 + divT)
+# 			# stat[name+'jdiag'] = 0.5 * ( rhs.jacdiag(0,y0) + rhs.jacdiag(args.T,yT) )
+# 			stat[name+'jac']   = 0.5 * ( jac0 + jacT )
+# 			stat[name+'f']     = 0.5 * ( rhs(0,y0).pow(2).sum() + rhs(args.T,yT).pow(2).sum() )
+# 			for t in range(1,args.steps):
+# 				y = self.ode_out[t].detach()
+# 				divt, jact = rhs.divjac(t,y)
+# 				stat[name+'div']   = stat[name+'div']   + divt
+# 				# stat[name+'jdiag'] = stat[name+'jdiag'] + rhs.jacdiag(t,y)
+# 				stat[name+'jac']   = stat[name+'jac']   + jact
+# 				stat[name+'f']     = stat[name+'f']     + rhs(t,y).pow(2).sum()
+
+# 			dim = y0.numel() / y0.size(0)
+# 			stat[name+'f']     = stat[name+'f'].detach()     / args.steps / dim
+# 			# stat[name+'jdiag'] = stat[name+'jdiag'].detach() / args.steps / dim
+# 			stat[name+'jac']   = stat[name+'jac'].detach()   / args.steps / dim**2
+# 			stat[name+'div']   = stat[name+'div'].detach()   / args.steps / dim
+
+# 			rhs.train(mode=self.training)
+
+# 		return stat
 
 
 
