@@ -9,7 +9,7 @@ import numpy as np
 import torch
 from torch.utils.tensorboard import SummaryWriter
 
-from implicitresnet import utils, theta_solver, regularized_ode_solver, rhs_mlp
+from implicitresnet import utils, theta_solver, rhs_mlp
 import ex_setup
 
 
