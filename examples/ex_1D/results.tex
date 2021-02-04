@@ -47,60 +47,60 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % test if imagefile exists and redefine \includegraphics to not fail
 
-\makeatletter % changes the catcode of @ to 11
-\newif\ifgraphicexist
-
-\catcode`\*=11
-\newcommand\imagetest[1]{%
-	\begingroup
-		\global\graphicexisttrue
-			\let\input@path\Ginput@path
-		\filename@parse{#1}%
-		\ifx\filename@ext\relax
-			\@for\Gin@temp:=\Gin@extensions\do{%
-				\ifx\Gin@ext\relax
-					\Gin@getbase\Gin@temp
-				\fi}%
-		\else
-			\Gin@getbase{\Gin@sepdefault\filename@ext}%
-			\ifx\Gin@ext\relax
-				\global\graphicexistfalse
-				\def\Gin@base{\filename@area\filename@base}%
-				\edef\Gin@ext{\Gin@sepdefault\filename@ext}%
-			\fi
-		\fi
-		\ifx\Gin@ext\relax
-			\global\graphicexistfalse
-		\else
-			\@ifundefined{Gin@rule@\Gin@ext}%
-				{\global\graphicexistfalse}%
-				{}%
-		\fi
-		\ifx\Gin@ext\relax
-			\gdef\imageextension{unknown}%
-		\else
-			\xdef\imageextension{\Gin@ext}%
-		\fi
-	\endgroup
-	\ifgraphicexist
-		\expandafter \@firstoftwo
-	\else
-		\expandafter \@secondoftwo
-	\fi
-}
-\catcode`\*=12
-
-
-% redefine \includegraphics
-\let\StandardIncludeGraphics\includegraphics%
-\renewcommand{\includegraphics}[2][]{%
-%	\IfFileExists{./images/#2}{\StandardIncludeGraphics[#1]{#2}}{
-	\imagetest{#2}{\StandardIncludeGraphics[#1]{#2}}{
-		\fbox{ File "\detokenize{#2}" missing }
-	}
-}
-
-\makeatother % changes the catcode of @ back to 12
+%\makeatletter % changes the catcode of @ to 11
+%\newif\ifgraphicexist
+%
+%\catcode`\*=11
+%\newcommand\imagetest[1]{%
+%	\begingroup
+%		\global\graphicexisttrue
+%			\let\input@path\Ginput@path
+%		\filename@parse{#1}%
+%		\ifx\filename@ext\relax
+%			\@for\Gin@temp:=\Gin@extensions\do{%
+%				\ifx\Gin@ext\relax
+%					\Gin@getbase\Gin@temp
+%				\fi}%
+%		\else
+%			\Gin@getbase{\Gin@sepdefault\filename@ext}%
+%			\ifx\Gin@ext\relax
+%				\global\graphicexistfalse
+%				\def\Gin@base{\filename@area\filename@base}%
+%				\edef\Gin@ext{\Gin@sepdefault\filename@ext}%
+%			\fi
+%		\fi
+%		\ifx\Gin@ext\relax
+%			\global\graphicexistfalse
+%		\else
+%			\@ifundefined{Gin@rule@\Gin@ext}%
+%				{\global\graphicexistfalse}%
+%				{}%
+%		\fi
+%		\ifx\Gin@ext\relax
+%			\gdef\imageextension{unknown}%
+%		\else
+%			\xdef\imageextension{\Gin@ext}%
+%		\fi
+%	\endgroup
+%	\ifgraphicexist
+%		\expandafter \@firstoftwo
+%	\else
+%		\expandafter \@secondoftwo
+%	\fi
+%}
+%\catcode`\*=12
+%
+%
+%% redefine \includegraphics
+%\let\StandardIncludeGraphics\includegraphics%
+%\renewcommand{\includegraphics}[2][]{%
+%%	\IfFileExists{./images/#2}{\StandardIncludeGraphics[#1]{#2}}{
+%	\imagetest{#2}{\StandardIncludeGraphics[#1]{#2}}{
+%		\fbox{ File "\detokenize{#2}" missing }
+%	}
+%}
+%
+%\makeatother % changes the catcode of @ back to 12
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 
@@ -154,8 +154,8 @@
 					title style={font=\small},
 					%y dir=reverse,
 					very thick ]
-				\foreach \adiv in {00, 025, 05, 075, 10}
-					\foreach \th in {00, 025, 05, 075, 10}
+				\foreach \adiv in {0.00, 0.25, 0.50, 0.75, 1.00}
+					\foreach \th in {0.00, 0.25, 0.50, 0.75, 1.00}
 						\addplot  table[x=Step,y=Value,col sep=comma, y expr=\thisrowno{1}] {theta\th_T5_data20_adiv\adiv_\qi.csv};
 			\end{axis}
 		\end{tikzpicture}
@@ -188,7 +188,7 @@
 				xlabel = $\theta$,
 				legend entries = {$\alpha_{div}=0.00$,$\alpha_{div}=0.25$,$\alpha_{div}=0.50$,$\alpha_{div}=0.75$,$\alpha_{div}=1.00$}
 			]
-			\foreach \adiv in {00, 025, 05, 075, 10}
+			\foreach \adiv in {0.00, 0.25, 0.50, 0.75, 1.00}
 				\addplot+ [mark=o, mark options={solid}]table[x=Step,y=Value,col sep=comma] {iters_vs_theta_adiv\adiv.csv};
 		\end{axis}
 	\end{tikzpicture}
@@ -199,7 +199,7 @@
 				xlabel = $\alpha_{div}$,
 				legend entries = {$\theta=0.00$,$\theta=0.25$,$\theta=0.50$,$\theta=0.75$,$\theta=1.00$}
 			]
-			\foreach \th in {00, 025, 05, 075, 10}
+			\foreach \th in {0.00, 0.25, 0.50, 0.75, 1.00}
 				\addplot+ [mark=o, mark options={solid}] table[x=Step,y=Value,col sep=comma] {iters_vs_adiv_theta\th.csv};
 		\end{axis}
 	\end{tikzpicture}
@@ -213,22 +213,22 @@
 \begin{figure}
 	\centering
 	\pgfplotsset{ticks=none}
-	\foreach \adiv / \ylbl in {000/0.0, 050/0.5, 100/1.0}
+	\foreach \adiv in {0.00, 0.50, 1.00}
 	{
-		\foreach \th / \ttl in {000/0.0, 050/0.5, 100/1.0 }
+		\foreach \th in {0.00, 0.50, 1.00}
 		{
 			\begin{tikzpicture}
 				\begin{axis}[width=0.35\textwidth, enlargelimits=false, axis on top, title={ \ifthenelse{\equal{\adiv}{000}}{$\theta=\ttl$}{} }, ylabel={  \ifthenelse{\equal{\th}{000}}{$\alpha_{div}=\ylbl$}{} }]
-					\addplot graphics [xmin=-7, xmax=7, ymin=-2, ymax=2] {th\th_T5_data20_adiv\adiv_traj.pdf};
+					\addplot graphics [xmin=-7, xmax=7, ymin=-2, ymax=2] {adiv_\adiv_theta_\th_traj.pdf};
 				\end{axis}
 			\end{tikzpicture}
 		}\\
-		\foreach \th / \ttl in {000/0.0, 050/0.5, 100/1.0 }
+		\foreach \th in {0.00, 0.50, 1.00}
 		{
 			\begin{tikzpicture}
 %				\begin{axis}[width=0.37\textwidth, enlargelimits=false, axis on top, title={}, ylabel={  \ifthenelse{\equal{\th}{000}}{$\alpha_{div}=\ylbl$}{} }]
 				\begin{axis}[width=0.35\textwidth, enlargelimits=false, axis on top, title={}, ylabel={  \ifthenelse{\equal{\th}{000}}{ \phantom{$\alpha_{div}=\ylbl$} }{} }]
-					\addplot graphics [points={(-3,-3) (3,3)}, includegraphics={trim=0 0 0 0,clip}] {th\th_T5_data20_adiv\adiv_spectrum.pdf};
+					\addplot graphics [points={(-3,-3) (3,3)}, includegraphics={trim=0 0 0 0,clip}] {adiv_\adiv_theta_\th_spectrum.pdf};
 				\end{axis}
 			\end{tikzpicture}
 		}\\

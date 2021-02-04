@@ -4,6 +4,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from pathlib import Path
+import pickle
 import numpy as np
 import ex_setup
 
@@ -40,14 +41,17 @@ logdir  = "./logs"
 savedir = "./output/data/"
 Path(savedir).mkdir(parents=True, exist_ok=True)
 
+with open(Path('output','name2args'),'rb') as f:
+	name2args = pickle.load(f)
 
 num_points = 50
 for run in os.listdir(logdir):
 	rundir = os.path.join(logdir, run)
 	if os.path.isdir(rundir):
 		data = _load_run(rundir)
-		args = ex_setup.get_options_from_name(run)
-		dataname = "theta%s_T%d_data%d_adiv%s"%( str(args['theta']).replace('.',''), args['T'], args['datasize'], str(args['adiv']).replace('.','') )
+		# args = ex_setup.get_options_from_name(run)
+		args = name2args[run].__dict__
+		dataname = ("theta%.2f_T%d_data%d_adiv%.2f"%( args['theta'], args['T'], args['datasize'], args['alpha']['div'] ))
 		for key, val in scalars.items():
 			ind = np.linspace( 0, data[val].shape[0]-1, num_points ).astype('int')
 			np.savetxt(savedir+dataname+key+".csv", data[val][ind,:], delimiter=',', header='Step, Value', comments='')
@@ -56,15 +60,15 @@ for run in os.listdir(logdir):
 for adiv in [0.0,0.25,0.5,0.75,1.0]:
 	iters_vs_theta = []
 	for theta in [0.0,0.25,0.5,0.75,1.0]:
-		dataname = "theta%s_T5_data%d_adiv%s"%( str(theta).replace('.',''), args['datasize'], str(adiv).replace('.','') )
+		dataname = ("theta%.2f_T%d_data%d_adiv%.2f"%( theta, args['T'], args['datasize'], adiv ))
 		data = np.loadtxt(savedir+dataname+"_iters.csv", delimiter=',', skiprows=1)
 		iters_vs_theta = iters_vs_theta + [theta, data[-1,1]]
-	np.savetxt(savedir+"iters_vs_theta_adiv%s.csv"%(str(adiv).replace('.','')), np.array(iters_vs_theta).reshape((-1,2)), delimiter=',', header='Step, Value', comments='')
+	np.savetxt(savedir+("iters_vs_theta_adiv%.2f.csv"%(adiv)), np.array(iters_vs_theta).reshape((-1,2)), delimiter=',', header='Step, Value', comments='')
 
 for theta in [0.0,0.25,0.5,0.75,1.0]:
 	iters_vs_adiv = []
 	for adiv in [0.0,0.25,0.5,0.75,1.0]:
-		dataname = "theta%s_T5_data%d_adiv%s"%( str(theta).replace('.',''), args['datasize'], str(adiv).replace('.','') )
+		dataname = ("theta%.2f_T%d_data%d_adiv%.2f"%( theta, args['T'], args['datasize'], adiv ))
 		data = np.loadtxt(savedir+dataname+"_iters.csv", delimiter=',', skiprows=1)
 		iters_vs_adiv = iters_vs_adiv + [adiv, data[-1,1]]
-	np.savetxt(savedir+"iters_vs_adiv_theta%s.csv"%(str(theta).replace('.','')), np.array(iters_vs_adiv).reshape((-1,2)), delimiter=',', header='Step, Value', comments='')
+	np.savetxt(savedir+("iters_vs_adiv_theta%.2f.csv"%(theta)), np.array(iters_vs_adiv).reshape((-1,2)), delimiter=',', header='Step, Value', comments='')

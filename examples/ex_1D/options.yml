@@ -1,0 +1,19 @@
+seed: 10
+
+tol: 1.e-6
+T: 5
+
+codim: 1
+width: 10
+depth: 3
+sigma: gelu
+
+init: rnd
+epochs: 3000
+lr: 1.e-3
+datasize: 20
+batch: -1
+
+aTV: -1.0
+ajac: 1.e-1
+mciters: 1
