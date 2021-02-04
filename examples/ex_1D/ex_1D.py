@@ -201,8 +201,9 @@ if __name__ == '__main__':
 
 
 		###############################################
-		# evaluate spectrum
+		fig = plt.figure(fig_no); fig_no += 1
 
+		# evaluate spectrum
 		spectrum_train = []
 		spectrum_test  = []
 		xmax = ymax = 4
@@ -219,16 +220,10 @@ if __name__ == '__main__':
 		spectrum_train = np.concatenate(spectrum_train)
 		spectrum_test  = np.concatenate(spectrum_test)
 
-
-		###############################################
 		# plot spectrum
-		fig = plt.figure(fig_no); fig_no += 1
-
 		ex_setup.plot_stab(args.theta, xlim=(-xmax,xmax), ylim=(-ymax,ymax))
-
 		plt.plot(spectrum_test[:,0],  spectrum_test[:,1], 'bo', markersize=4) #, markerfacecolor='none')
 		plt.plot(spectrum_train[:,0], spectrum_train[:,1],'ro', markersize=4)
-
 		plt.savefig(images_output+"_spectrum.pdf", bbox_inches='tight', pad_inches=0.0)
 
 

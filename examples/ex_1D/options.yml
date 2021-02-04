@@ -1,5 +1,6 @@
 seed: 10
 
+theta: 0.5
 tol: 1.e-6
 T: 5
 
@@ -14,6 +15,7 @@ lr: 1.e-3
 datasize: 20
 batch: -1
 
+adiv: 0.25
 aTV: -1.0
 ajac: 1.e-1
 mciters: 1
