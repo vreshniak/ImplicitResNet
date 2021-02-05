@@ -89,6 +89,11 @@ def gmres( A, x, b, max_iters=None, min_iters=3, max_restarts=1, tol=None, M=Non
 	dtype     = x.dtype
 	device    = x.device
 
+	if n==1:
+		x = b / (A(torch.ones_like(x))+1.e-12)
+		r = M(b-A(x))
+		return x, r.norm(dim=1).amax(), 1, 0
+
 	if tol is None: tol = 1*torch.finfo(dtype).eps
 	tol = max(tol*b.norm(1).amax(), tol)
 
