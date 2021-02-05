@@ -76,20 +76,26 @@ class rhs_base(torch.nn.Module, metaclass=ABCMeta):
 				m(x)
 
 	def t2ind(self, t):
-		return min(int(t/self.h), len(self.F)-1)
+		if torch.is_tensor(t):
+			assert t.ndim<2, "t must be either a scalar or a vector"
+			return torch.clamp( (t/self.h).int(), max=len(self.F)-1 )
+		else:
+			return min(int(t/self.h), len(self.F)-1)
 
 
 	def forward(self, t, y):
 		ind = self.t2ind(t)
-		# f, a, b = self.F[ind](y), self.eigmin, self.eigmax
+		if torch.is_tensor(ind):
+			# need to sacrifice full batch parallelization here
+			f = [ self.F[i](y[batch,...]) for batch, i in enumerate(ind) ]
+			f = torch.stack(f)
+			# this doesn't work. why?
+			# f = [ self.F[i](y[i==ind,...]) for i in torch.unique(ind) ]
+			# f = torch.cat(f,0)
+		else:
+			f = self.F[ind](y)
 
-		# if self.learn_scales:
-		# 	f = torch.sigmoid(self.scales) * f
-		# if self.learn_shift:
-		# 	a = self.eiginit + torch.sigmoid(self.shifta) * ( self.eigmin - self.eiginit )
-		# 	b = self.eiginit + torch.sigmoid(self.shiftb) * ( self.eigmax - self.eiginit )
-
-		f = torch.sigmoid(self.scales) * self.F[ind](y)
+		f = torch.sigmoid(self.scales) * f
 		a = self.eiginit + torch.sigmoid(self.shifta) * ( self.eigmin - self.eiginit )
 		b = self.eiginit + torch.sigmoid(self.shiftb) * ( self.eigmax - self.eiginit )
 
@@ -97,43 +103,40 @@ class rhs_base(torch.nn.Module, metaclass=ABCMeta):
 
 
 
+###############################################################################
+###############################################################################
+
+
 
 class rhs_mlp(rhs_base):
-	def __init__(self, data_dim, args, final_activation=None):
-		# dimension of the state space
-		self.dim = data_dim+args.codim
-		super().__init__([shape,], args)
+	def __init__(self, dim, width, depth, T, num_steps, activation='relu', final_activation=None, power_iters=0, spectral_limits=None, learn_scales=False, learn_shift=False):
+		super().__init__((dim,), T, num_steps, spectral_limits, learn_scales, learn_shift)
 
-		# activation
-		if len(args.sigma)==1:
-			sigma, final_activation = args.sigma[0], None
-		elif len(args.sigma)==2:
-			sigma, final_activation = args.sigma
-		else:
-			assert False, 'args.sigma should have either 1 or 2 entries'
+		if final_activation is None:
+			final_activation = activation
 
-		# depth of rhs
-		rhs_depth = args.steps if args.aTV>=0 else 1
-
-		# structured rhs
-		structure = args.prefix if args.prefix is not None else 'mlp'
-		if structure=='par':
-			self.F = torch.nn.ModuleList( [ ParabolicPerceptron( dim=self.dim, width=args.width, activation=sigma, power_iters=args.piters) for _ in range(rhs_depth) ] )
-		elif structure=='ham':
-			self.F = torch.nn.ModuleList( [ HamiltonianPerceptron( dim=self.dim, width=args.width, activation=sigma, power_iters=args.piters) for _ in range(rhs_depth) ] )
-		elif structure=='hol':
-			self.F = torch.nn.ModuleList( [ HollowMLP(dim=self.dim, width=args.width, depth=args.depth, activation=sigma, final_activation=final_activation, power_iters=args.piters) for _ in range(rhs_depth) ] )
-		elif structure=='mlp':
-			self.F = torch.nn.ModuleList( [ MLP(in_dim=self.dim, out_dim=self.dim, width=args.width, depth=args.depth, activation=sigma, final_activation=final_activation, power_iters=args.piters) for _ in range(rhs_depth) ] )
+		self.F = torch.nn.ModuleList( [ MLP(in_dim=dim, out_dim=dim, width=width, depth=depth, activation=activation, final_activation=final_activation, power_iters=power_iters) for _ in range(num_steps) ] )
 
 		# intialize rhs
 		self.initialize()
 
+class rhs_hamiltonian_mlp(rhs_base):
+	def __init__(self, dim, width, T, num_steps, activation='relu', power_iters=0, spectral_limits=None, learn_scales=False, learn_shift=False):
+		super().__init__((dim,), T, num_steps, spectral_limits, learn_scales, learn_shift)
 
-	def ones_like_input(self):
-		return torch.ones((1,self.dim), dtype=torch.float)
+		self.F = torch.nn.ModuleList( [ HamiltonianPerceptron(dim=dim, width=width, activation=activation, power_iters=power_iters) for _ in range(num_steps) ] )
 
+		# intialize rhs
+		self.initialize()
 
+class rhs_parabolic_mlp(rhs_base):
+	def __init__(self, dim, width, T, num_steps, activation='relu', power_iters=0, spectral_limits=None, learn_scales=False, learn_shift=False):
+		super().__init__((dim,), T, num_steps, spectral_limits, learn_scales, learn_shift)
+
+		self.F = torch.nn.ModuleList( [ ParabolicPerceptron(dim=dim, width=width, activation=activation, power_iters=power_iters) for _ in range(num_steps) ] )
+
+		# intialize rhs
+		self.initialize()
 
 
 class rhs_conv2d(rhs_base):
