@@ -221,7 +221,7 @@ class TrainingLoop:
 							for key, value in epoch_val_acc_items.items():  self.writer.add_scalar('accuracy/'+key+'_validation', value, self.curr_epoch)
 
 					# print training progress
-					message = "Epoch %4d: %4.2f sec, loss"%(self.curr_epoch, sec)
+					message = "Epoch %4d: %5.2f sec, loss"%(self.curr_epoch, sec)
 					for val in epoch_loss_items.values():
 						message = message + " %5.2e"%(val)
 					if self.accuracy_fn is not None:
@@ -229,7 +229,7 @@ class TrainingLoop:
 						for val in epoch_acc_items.values():
 							message = message + " %4.2f"%(val)
 					if self.val_dataloader is not None:
-						message = message + "  ||  %4.2f sec, val_loss"%(val_sec)
+						message = message + "  ||  %5.2f sec, val_loss"%(val_sec)
 						for val in epoch_val_loss_items.values():
 							message = message + " %5.2e"%(val)
 						if self.accuracy_fn is not None:
