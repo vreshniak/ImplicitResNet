@@ -10,9 +10,6 @@ width: 20
 depth: 4
 sigma: relu
 
-scales: learn
-piters: 0
-
 init: rnd
 epochs: 3000
 lr: 1.e-3

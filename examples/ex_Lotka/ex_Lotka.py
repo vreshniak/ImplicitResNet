@@ -86,7 +86,7 @@ if __name__ == '__main__':
 	# 	plt.plot(t_train, y_train[i,:,0], '-r')
 	# 	plt.plot(t_train, y_train[i,:,1], '-b')
 	# plt.show()
-
+	#
 	# # exact phase plot
 	# for i in range(len(y0_train)):
 	# 	plt.plot(y_train[i,:,0], y_train[i,:,1], '-')
@@ -139,7 +139,7 @@ if __name__ == '__main__':
 
 
 	if args.mode=="train":
-		optimizer   = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.alpha['wdecay'])
+		optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.alpha['wdecay'])
 		scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=50, verbose=True, threshold=1.e-5, threshold_mode='rel', cooldown=50, min_lr=1.e-6, eps=1.e-8)
 		# scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=500, gamma=0.7, last_epoch=-1)
 		train_model = utils.TrainingLoop(model, loss_fn, dataset, args.batch, optimizer, val_dataset=val_dataset, scheduler=scheduler, val_freq=50, stat_freq=10)
@@ -180,17 +180,20 @@ if __name__ == '__main__':
 		y_train = y_train.detach().numpy()
 
 		# learned discrete solution
-		model.ode.T         = periods*args.T
-		model.ode.num_steps = periods*args.steps
-		y_learned = model(y0_train).detach().numpy()
-		t_learned = model.ode._t.detach().numpy()
+		model.ode.T          = periods*args.T
+		model.ode.num_steps  = periods*args.steps
+		t_learned, y_learned = model.ode.sequence(y0_train)
+		t_learned = t_learned.detach().numpy()
+		y_learned = y_learned.detach().numpy()
 
 		# continuous solution with learned vector field
 		model.ode.T         = periods*args.T
 		model.ode.num_steps = periods*1000
 		model.ode.theta     = 0.5
-		y_learned_ode = model(y0_train).detach().numpy()
-		t_learned_ode = model.ode._t.detach().numpy()
+		t_learned_ode, y_learned_ode = model.ode.sequence(y0_train)
+		t_learned_ode = t_learned_ode.detach().numpy()
+		y_learned_ode = y_learned_ode.detach().numpy()
+
 
 		# save solutions as tables such that x,y solution components come in pairs (total num_trajectories pairs) along the second dimension
 		np.savetxt( Path(paths['output_data'],'training_data.csv'),          np.hstack( (t_train.reshape((-1,1)),                np.concatenate(y_train,  axis=1))                 ), delimiter=',')
