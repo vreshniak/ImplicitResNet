@@ -85,7 +85,8 @@ class rhs_base(torch.nn.Module, metaclass=ABCMeta):
 
 	def forward(self, t, y):
 		ind = self.t2ind(t)
-		if torch.is_tensor(ind):
+		if torch.is_tensor(ind) and ind.ndim>0:
+			assert ind.size(0)==y.size(0), "if t is tensor, it must have the same batch dimension as y"
 			# need to sacrifice full batch parallelization here
 			f = [ self.F[i](y[batch,...]) for batch, i in enumerate(ind) ]
 			f = torch.stack(f)
