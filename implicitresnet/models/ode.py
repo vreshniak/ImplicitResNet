@@ -61,10 +61,10 @@ class linsolve_backprop(torch.autograd.Function):
 		if _debug:
 			resid1 = matvec(dy).sum()
 			resid2 = matvec(dy).sum()
-			assert resid1==resid2, "spectral normalization not frozen in backprop, delta_residual=%.2e"%((resid1-resid2).abs()) #.item())
+			assert resid1==resid2, "spectral normalization not frozen in backprop, delta_residual=%.2e"%((resid1-resid2).abs())
 			for name, param in ctx.self.named_parameters():
 				assert param.grad is None or (param.grad-pre_grad[name]).sum()==0, "linsolver propagated gradients to parameters"
-		if flag>0: warnings.warn("%s in backprop didn't converge for ode %s, error is %.2E"%(_lin_solver, ctx.self.name, error)) #.item()))
+		if flag>0: warnings.warn("%s in backprop didn't converge for ode %s, error is %.2E"%(_lin_solver, ctx.self.name, error))
 
 
 		stop = time.time()
@@ -97,7 +97,8 @@ class ode_solver(torch.nn.Module, metaclass=ABCMeta):
 		self.register_buffer('_num_steps', torch.tensor(num_steps))
 		self.register_buffer('_h', torch.tensor(T/num_steps))
 
-		self._t = []
+		self.evolution = False
+		self._t = deque([], maxlen=num_steps+1)
 		self._y = deque([], maxlen=num_steps+1)
 		self._stat = {}
 
@@ -105,15 +106,17 @@ class ode_solver(torch.nn.Module, metaclass=ABCMeta):
 
 	@property
 	def num_steps(self):
-		return self._num_steps #.item()
+		return self._num_steps
 	@num_steps.setter
 	def num_steps(self, num_steps):
 		self._num_steps.fill_(num_steps)
 		self._h = self.T / num_steps
+		self._t = deque([], maxlen=num_steps+1)
+		self._y = deque([], maxlen=num_steps+1)
 
 	@property
 	def T(self):
-		return self._T #.item()
+		return self._T
 	@T.setter
 	def T(self, T):
 		self._T.fill_(T)
@@ -121,7 +124,7 @@ class ode_solver(torch.nn.Module, metaclass=ABCMeta):
 
 	@property
 	def h(self):
-		return self._h #.item()
+		return self._h
 
 	########################################
 
@@ -162,18 +165,36 @@ class ode_solver(torch.nn.Module, metaclass=ABCMeta):
 	########################################
 
 	def trajectory(self, y0, t0=0):
-		training = self.training
-		self.train(True)
+		# returns lists of length (time points) of size (batch size, 1), (batch size, hidden dim)
+		evolution = self.evolution
+		self.evolution = True
 		self.forward(y0, t0)
-		self.train(training)
-		return self._t, list(self._y)
+		self.evolution = evolution
+		return list(self._t), list(self._y)
+
+	def sequence(self, y0, t0=0):
+		# returns tensors of shape (batch size, time points), (batch size, time points, hidden dim)
+		evolution = self.evolution
+		self.evolution = True
+		self.forward(y0, t0)
+		self.evolution = evolution
+		if self._t[0].ndim==0:
+			t = torch.stack(list(self._t))
+		elif self._t[0].ndim==1:
+			t = torch.stack(list(self._t), 1)
+		else:
+			raise ValueError("ode.sequence(): self._t must have 1 or 2 dimensions, got %d"%(self._t[0].ndim))
+		return t, torch.stack(list(self._y), 1)
 
 	def forward(self, y0, t0=0):
-		if self.training:
-			self._t = [t0+step*self.h for step in range(self.num_steps+1)]
+		if self.training or self.evolution:
+			# self._t = torch.linspace(t0,t0+self.T,self.num_steps+1)
+			# self._t = [t0+step*self.h for step in range(self.num_steps+1)]
+			self._t.append(t0+0*self.h) # to make it a tensor
 			self._y.append(y0)
-			for step in range(self.num_steps):
-				self._y.append(self.ode_step(self._t[step], self._y[-1]))
+			for step in range(1,self.num_steps+1):
+				self._y.append(self.ode_step(self._t[-1], self._y[-1]))
+				self._t.append(t0+step*self.h)
 			return self._y[-1]
 		else:
 			y = y0
@@ -199,7 +220,7 @@ class theta_solver(ode_solver):
 
 	@property
 	def theta(self):
-		return self._theta #.item()
+		return self._theta
 	@theta.setter
 	def theta(self, theta):
 		self._theta.fill_(theta)
@@ -247,7 +268,7 @@ class theta_solver(ode_solver):
 
 				# assert not torch.isnan(resid), "NaN value in the residual of the %s nsolver for layer %s at t=%d"%(_nsolver, self.name, t)
 				if _debug:
-					assert init_resid==residual_fn(x).amax().detach(), "spectral normalization not frozen, delta_residual=%.2e"%((init_resid-residual_fn(x).amax()).abs()) #.item())
+					assert init_resid==residual_fn(x).amax().detach(), "spectral normalization not frozen, delta_residual=%.2e"%((init_resid-residual_fn(x).amax()).abs())
 					if self.training:
 						for param in self.parameters():
 							assert param.grad is None or param.grad.sum()==0, "nsolver propagated gradients to parameters"
@@ -312,8 +333,7 @@ def compute_regularizers_and_statistics(solver, input, output):
 		rhs.eval()
 
 		# contribution of divergence along the trajectory
-		p = 2 if alpha['TV']>0 else 0
-		c = (((t+1)/n)**p for t in range(n))
+		c = (((t+1)/n)**solver.p for t in range(n))
 
 		# evaluate divergence and jacobian along the trajectory
 		if alpha['div']!=0 or alpha['jac']!=0 or _collect_stat:
@@ -348,7 +368,7 @@ def compute_regularizers_and_statistics(solver, input, output):
 			w1 = torch.nn.utils.parameters_to_vector(rhs.F[0].parameters())
 			for t in range(len(rhs.F)-1):
 				w2 = torch.nn.utils.parameters_to_vector(rhs.F[t+1].parameters())
-				reg[name+'TV'] = ( w2 - w1 ).pow(2).sum()
+				reg[name+'TV'] = reg.get(name+'TV',0) + ( w2 - w1 ).pow(2).sum()
 				w1 = w2
 			reg[name+'TV'] = (alpha['TV'] / steps) * reg[name+'TV']
 
@@ -357,11 +377,13 @@ def compute_regularizers_and_statistics(solver, input, output):
 
 		setattr(solver, 'regularizer', reg)
 		if _collect_stat:
+			stat['rhs/'+name+'jac'] = stat['rhs/'+name+'jac'].sqrt()
+			stat['rhs/'+name+'f']   = stat['rhs/'+name+'f'].sqrt()
 			setattr(rhs, 'statistics', stat)
 	return None
 
 
-def regularized_ode_solver(solver, alpha={}, stability_limits=None, mciters=1):
+def regularized_ode_solver(solver, alpha={}, stability_limits=None, mciters=1, p=2):
 	if 'div'   not in alpha: alpha['div']   = 0.0
 	if 'jac'   not in alpha: alpha['jac']   = 0.0
 	if 'f'     not in alpha: alpha['f']     = 0.0
@@ -369,6 +391,7 @@ def regularized_ode_solver(solver, alpha={}, stability_limits=None, mciters=1):
 	if 'TV'    not in alpha: alpha['TV']    = 0.0
 	setattr(solver, 'alpha', alpha)
 	setattr(solver, 'mciters', mciters)
+	setattr(solver, 'p', p)
 	if stability_limits is not None:
 		min_eig = max(-10, theta_inv_stability_fun(solver.theta, stability_limits[0]) )
 		max_eig = min( 10, theta_inv_stability_fun(solver.theta, stability_limits[2]) )
