@@ -100,6 +100,7 @@ class ode_solver(torch.nn.Module, metaclass=ABCMeta):
 		# self.evolution = False
 		self._t = deque([], maxlen=num_steps+1)
 		self._y = deque([], maxlen=num_steps+1)
+		interp_coef = None
 		if t_out is not None:
 			assert torch.is_tensor(t_out) and t_out.ndim==1, "t_out must a 1d tensor, got %s"%(t_out)
 			if t_out.numel()>1: assert torch.amin(t_out[1:]-t_out[:-1])>0, "t_out must be increasing sequence"
@@ -111,7 +112,6 @@ class ode_solver(torch.nn.Module, metaclass=ABCMeta):
 			assert torch.is_tensor(ind_out) and ind_out.ndim==1, "ind_out must a 1d tensor, got %s"%(ind_out)
 			if ind_out.numel()>1: assert torch.amin(ind_out[1:]-ind_out[:-1])>0, "ind_out must be increasing sequence"
 			assert ind_out[0]>=0 and ind_out[-1]<=num_steps, "ind_out must have values in [0,num_steps]"
-			interp_coef = None
 		self.register_buffer('_ind_out',     ind_out)
 		self.register_buffer('_interp_coef', interp_coef)
 		self._stat = {}
