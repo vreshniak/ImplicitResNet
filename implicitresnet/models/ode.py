@@ -85,7 +85,7 @@ class linsolve_backprop(torch.autograd.Function):
 
 
 class ode_solver(torch.nn.Module, metaclass=ABCMeta):
-	def __init__(self, rhs, T, num_steps):
+	def __init__(self, rhs, T, num_steps, t_out=None, ind_out=None):
 		super().__init__()
 
 		# ODE count in a network as a class property
@@ -97,9 +97,23 @@ class ode_solver(torch.nn.Module, metaclass=ABCMeta):
 		self.register_buffer('_num_steps', torch.tensor(num_steps))
 		self.register_buffer('_h', torch.tensor(T/num_steps))
 
-		self.evolution = False
+		# self.evolution = False
 		self._t = deque([], maxlen=num_steps+1)
 		self._y = deque([], maxlen=num_steps+1)
+		if t_out is not None:
+			assert torch.is_tensor(t_out) and t_out.ndim==1, "t_out must a 1d tensor, got %s"%(t_out)
+			if t_out.numel()>1: assert torch.amin(t_out[1:]-t_out[:-1])>0, "t_out must be increasing sequence"
+			assert t_out[0]>=0 and t_out[-1]<=T, "t_out must have values in [0,T]"
+			ind_out     = (t_out/self._h).long()
+			interp_coef = t_out/self._h - ind_out
+		if ind_out is not None:
+			assert t_out is None, "either t_out or ind_out can be given, not both"
+			assert torch.is_tensor(ind_out) and ind_out.ndim==1, "ind_out must a 1d tensor, got %s"%(ind_out)
+			if ind_out.numel()>1: assert torch.amin(ind_out[1:]-ind_out[:-1])>0, "ind_out must be increasing sequence"
+			assert ind_out[0]>=0 and ind_out[-1]<=num_steps, "ind_out must have values in [0,num_steps]"
+			interp_coef = None
+		self.register_buffer('_ind_out',     ind_out)
+		self.register_buffer('_interp_coef', interp_coef)
 		self._stat = {}
 
 	########################################
@@ -109,22 +123,61 @@ class ode_solver(torch.nn.Module, metaclass=ABCMeta):
 		return self._num_steps
 	@num_steps.setter
 	def num_steps(self, num_steps):
+		if self._interp_coef is not None:
+			t_out = self._h * (self._ind_out + self._interp_coef)
+		elif self._ind_out is not None:
+			h = self._h
 		self._num_steps.fill_(num_steps)
 		self._h = self.T / num_steps
 		self._t = deque([], maxlen=num_steps+1)
 		self._y = deque([], maxlen=num_steps+1)
+		if self._interp_coef is not None:
+			self._ind_out     = (t_out/self._h).long()
+			self._interp_coef = t_out/self._h - ind_out
+		elif self._ind_out is not None:
+			self._ind_out = ((h/self._h)*self._ind_out).long()
 
 	@property
 	def T(self):
 		return self._T
 	@T.setter
 	def T(self, T):
+		if self._interp_coef is not None:
+			t_out = self._h * (self._ind_out + self._interp_coef)
+		elif self._ind_out is not None:
+			h = self._h
 		self._T.fill_(T)
 		self._h = T / self.num_steps
+		if self._interp_coef is not None:
+			self._ind_out     = (t_out/self._h).long()
+			self._interp_coef = t_out/self._h - ind_out
+		elif self._ind_out is not None:
+			self._ind_out = ((h/self._h)*self._ind_out).long()
 
 	@property
 	def h(self):
 		return self._h
+
+	@property
+	def ind_out(self):
+		return self._ind_out
+	@ind_out.setter
+	def ind_out(self, ind_out):
+		self._ind_out = ind_out
+
+	@property
+	def t_out(self):
+		if self._interp_coef is not None:
+			t_out = self._h * (self._ind_out + self._interp_coef)
+		elif self._ind_out is not None:
+			t_out = self._h * self._ind_out
+		else:
+			return None
+		return t_out
+	@t_out.setter
+	def t_out(self, t_out):
+		self._ind_out     = (t_out/self._h).long()
+		self._interp_coef = t_out/self._h - ind_out
 
 	########################################
 
@@ -164,38 +217,59 @@ class ode_solver(torch.nn.Module, metaclass=ABCMeta):
 
 	########################################
 
-	def trajectory(self, y0, t0=0):
-		# returns lists of length (time points) of size (batch size, 1), (batch size, hidden dim)
-		evolution = self.evolution
-		self.evolution = True
-		self.forward(y0, t0)
-		self.evolution = evolution
-		return list(self._t), list(self._y)
+	# def trajectory(self, y0, t0=0):
+	# 	# returns lists of length (time points) of size (batch size, 1), (batch size, hidden dim)
+	# 	evolution = self.evolution
+	# 	self.evolution = True
+	# 	self.forward(y0, t0)
+	# 	self.evolution = evolution
+	# 	return list(self._t), list(self._y)
 
-	def sequence(self, y0, t0=0):
-		# returns tensors of shape (batch size, time points), (batch size, time points, hidden dim)
-		evolution = self.evolution
-		self.evolution = True
-		self.forward(y0, t0)
-		self.evolution = evolution
-		if self._t[0].ndim==0:
-			t = torch.stack(list(self._t))
-		elif self._t[0].ndim==1:
-			t = torch.stack(list(self._t), 1)
-		else:
-			raise ValueError("ode.sequence(): self._t must have 1 or 2 dimensions, got %d"%(self._t[0].ndim))
-		return t, torch.stack(list(self._y), 1)
+	# def sequence(self, y0, t0=0):
+	# 	# returns tensors of shape (batch size, time points), (batch size, time points, hidden dim)
+	# 	evolution = self.evolution
+	# 	self.evolution = True
+	# 	self.forward(y0, t0)
+	# 	self.evolution = evolution
+	# 	if self._t[0].ndim==0:
+	# 		t = torch.stack(list(self._t))
+	# 	elif self._t[0].ndim==1:
+	# 		t = torch.stack(list(self._t), 1)
+	# 	else:
+	# 		raise ValueError("ode.sequence(): self._t must have 1 or 2 dimensions, got %d"%(self._t[0].ndim))
+	# 	return t, torch.stack(list(self._y), 1)
 
-	def forward(self, y0, t0=0):
-		if self.training or self.evolution:
-			# self._t = torch.linspace(t0,t0+self.T,self.num_steps+1)
-			# self._t = [t0+step*self.h for step in range(self.num_steps+1)]
+	def forward(self, y0, t0=0, return_t=False):
+		if self.training or self._ind_out is not None:
+			# evaluate solution at the grid points
 			self._t.append(t0+0*self.h) # to make it a tensor
 			self._y.append(y0)
 			for step in range(1,self.num_steps+1):
 				self._y.append(self.ode_step(self._t[-1], self._y[-1]))
 				self._t.append(t0+step*self.h)
-			return self._y[-1]
+
+			# evaluate solution at the given points
+			if self._interp_coef is not None:
+				# returns tensor of shape (batch size, time points, hidden dim)
+				y = [ ((1-c[i])*self._y[i] if c[i]<1 else 0) + (c[i]*self._y[i+1] if c[i]>0 else 0) for i, c in zip(self._ind_out, self._interp_coef) ]
+				y = torch.stack(y, 1)
+				if return_t:
+					t = [ ((1-c[i])*self._t[i] if c[i]<1 else 0) + (c[i]*self._t[i+1] if c[i]>0 else 0) for i, c in zip(self._ind_out, self._interp_coef) ]
+					t = torch.stack(t) if t[0].ndim==0 else torch.stack(t, 1)
+			elif self._ind_out is not None:
+				y = [ self._y[i] for i in self._ind_out ]
+				y = torch.stack(y, 1)
+				if return_t:
+					t = [ self._t[i] for i in self._ind_out ]
+					t = torch.stack(t) if t[0].ndim==0 else torch.stack(t, 1)
+			else:
+				t = self._t[-1]
+				y = self._y[-1]
+
+			if return_t:
+				return t, y
+			else:
+				return y
 		else:
 			y = y0
 			for step in range(self.num_steps):
@@ -210,8 +284,8 @@ class ode_solver(torch.nn.Module, metaclass=ABCMeta):
 
 
 class theta_solver(ode_solver):
-	def __init__(self, rhs, T, num_steps, theta=0.0, tol=_TOL):
-		super().__init__(rhs, T, num_steps)
+	def __init__(self, rhs, T, num_steps, theta, t_out=None, ind_out=None, tol=_TOL):
+		super().__init__(rhs, T, num_steps, t_out, ind_out)
 
 		self.register_buffer('_theta', torch.tensor(theta))
 		self.tol = tol
