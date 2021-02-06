@@ -115,7 +115,7 @@ if __name__ == '__main__':
 		rhs_steps = args.steps if args.alpha['TV']>=0 else 1
 		rhs    = rhs_mlp(dim, args.width, args.depth, T=args.T, num_steps=rhs_steps, activation=args.sigma, learn_scales=args.learn_scales, learn_shift=args.learn_shift)
 		solver = theta_solver( rhs, args.T, args.steps, args.theta, tol=args.tol )
-		return regularized_ode_solver( solver, args.alpha, mciters=args.mciters )
+		return regularized_ode_solver( solver, args.alpha, mciters=args.mciters, p=2 )
 	########################################################
 
 	model = torch.nn.Sequential( augment(), ode_block(), output() )
@@ -184,12 +184,16 @@ if __name__ == '__main__':
 		model_output_train = model(torch.from_numpy(xtrain).float()).detach().numpy()
 		model_output_test  = model(torch.from_numpy(xtest).float()).detach().numpy()
 
-		ode_output_train = [ y.detach().numpy() for y in model[1].trajectory( model[0](torch.from_numpy(xtrain).float()))[1] ]
-		ode_output_test  = [ y.detach().numpy() for y in model[1].trajectory( model[0](torch.from_numpy(xtest).float()) )[1] ]
+		# ode_output_train = [ y.detach().numpy() for y in model[1].trajectory( model[0](torch.from_numpy(xtrain).float()))[1] ]
+		# ode_output_test  = [ y.detach().numpy() for y in model[1].trajectory( model[0](torch.from_numpy(xtest).float()) )[1] ]
+		model[1].ind_out = torch.arange(args.steps+1)
+		ode_output_train = [ y.detach().numpy() for y in model[1]( model[0](torch.from_numpy(xtrain).float())).movedim(0,1) ]
+		ode_output_test  = [ y.detach().numpy() for y in model[1]( model[0](torch.from_numpy(xtest).float()) ).movedim(0,1) ]
 
 		std = 0.2
-		ode_output_up   = [ y.detach().numpy() for y in model[1].trajectory( model[0](torch.from_numpy(xtest).float(), std))[1] ]
-		ode_output_down = [ y.detach().numpy() for y in model[1].trajectory( model[0](torch.from_numpy(xtest).float(),-std))[1] ]
+		ode_output_up    = [ y.detach().numpy() for y in model[1]( model[0](torch.from_numpy(xtest).float(), std)).movedim(0,1) ]
+		ode_output_down  = [ y.detach().numpy() for y in model[1]( model[0](torch.from_numpy(xtest).float(),-std)).movedim(0,1) ]
+		model[1].ind_out = None
 
 		###############################################
 		# # plot function
