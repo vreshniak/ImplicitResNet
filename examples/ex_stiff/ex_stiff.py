@@ -109,7 +109,8 @@ if __name__ == '__main__':
 	# NN parameters
 
 
-	loss_fn = lambda input, target: (input[:,::args.steps//args.datasteps,:]-target[:,::args.steps//args.datasteps,:]).pow(2).flatten().mean()
+	# loss_fn = lambda input, target: (input[:,::args.steps//args.datasteps,:]-target[:,::args.steps//args.datasteps,:]).pow(2).flatten().mean()
+	loss_fn = lambda input, target: (input-target[:,::args.steps//args.datasteps,:]).pow(2).flatten().mean()
 
 
 	#########################################################################################
@@ -117,21 +118,8 @@ if __name__ == '__main__':
 	# NN model
 
 
-	########################################################
-	class ode_block(torch.nn.Module):
-		def __init__(self, rhs, T, steps, theta):
-			super().__init__()
-			self.ode = regularized_ode_solver(theta_solver(rhs, T, steps, theta, tol=args.tol), alpha=args.alpha, mciters=1, p=0)
-
-		def forward(self, y0, t0):
-			# compute_regularizers_and_statistics forward hook not called from ode.sequence (why? is it because of self.forward?)
-			self.ode(y0, t0)
-			return torch.stack(list(self.ode._y), 1)
-	########################################################
-
-
 	rhs   = rhs_mlp(1, args.width, args.depth, T=2*args.T, num_steps=2*args.steps, activation=args.sigma, power_iters=args.piters, spectral_limits=args.eiglims, learn_scales=args.learn_scales, learn_shift=args.learn_shift)
-	model = ode_block( rhs, args.T, args.steps, args.theta )
+	model = regularized_ode_solver(theta_solver(rhs, args.T, args.steps, args.theta, ind_out=torch.arange(0,args.steps+1,args.steps//args.datasteps), tol=args.tol), alpha=args.alpha, mciters=1, p=0)
 
 
 
@@ -175,14 +163,12 @@ if __name__ == '__main__':
 		data_output   = "%s/%s"%(Path(paths['output_data']),   args.name)
 
 		model.eval()
-		rhs_obj = model.ode.rhs
+		rhs_obj = model.rhs
 
 
 		#########################################################################################
 		# prepare data
 
-		# t0 = [0.]
-		# y0 = [0.]
 
 		# true solution on the discrete time grid
 		_, _, t_true, y_true = get_data(samples=20)
@@ -197,15 +183,17 @@ if __name__ == '__main__':
 
 
 		# learned solution on the discrete time grid
-		t_learned, y_learned = model.ode.sequence(y0, t0)
+		model.ind_out = torch.arange(args.steps+1)
+		t_learned, y_learned = model(y0, t0, return_t=True)
 		t_learned = t_learned.reshape((-1,args.steps+1)).detach().numpy()
 		y_learned = y_learned.reshape((-1,args.steps+1)).detach().numpy()
 
 
 		# continuous solution with learned vector field
-		model.ode.num_steps = 1000
-		model.ode.theta     = 0.0
-		t_learned_ode, y_learned_ode = model.ode.sequence(y0, t0)
+		model.num_steps = 1000
+		model.theta     = 0.0
+		model.ind_out   = torch.arange(1001)
+		t_learned_ode, y_learned_ode = model(y0, t0, return_t=True)
 		t_learned_ode = t_learned_ode.reshape((-1,1001)).detach().numpy()
 		y_learned_ode = y_learned_ode.reshape((-1,1001)).detach().numpy()
 
