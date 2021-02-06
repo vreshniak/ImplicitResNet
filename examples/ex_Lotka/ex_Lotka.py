@@ -104,7 +104,7 @@ if __name__ == '__main__':
 	# Loss
 
 
-	loss_fn = lambda input, target: (input[:,::args.steps//args.datasteps,:]-target[:,::args.steps//args.datasteps,:]).pow(2).flatten().mean()
+	loss_fn = lambda input, target: (input-target[:,::args.steps//args.datasteps,:]).pow(2).flatten().mean()
 
 
 	#########################################################################################
@@ -112,19 +112,8 @@ if __name__ == '__main__':
 	# NN model
 
 
-	########################################################
-	class ode_block(torch.nn.Module):
-		def __init__(self, rhs, T, steps, theta):
-			super().__init__()
-			self.ode = theta_solver(rhs, T, steps, theta, tol=args.tol)
-
-		def forward(self, y0, t0=0):
-			return self.ode.sequence(y0)[1]
-	########################################################
-
 	rhs   = rhs_mlp(2, args.width, args.depth, T=1, num_steps=1, activation=args.sigma, learn_scales=args.learn_scales, learn_shift=args.learn_shift)
-	model = ode_block( rhs, args.T, args.steps, args.theta )
-
+	model = theta_solver(rhs, args.T, args.steps, args.theta, ind_out=torch.arange(0,args.steps+1,args.steps//args.datasteps), tol=args.tol)
 
 
 	#########################################################################################
@@ -168,7 +157,7 @@ if __name__ == '__main__':
 		data_output   = "%s/%s"%(Path(paths['output_data']),   args.name)
 
 		model.eval()
-		rhs_obj = model.ode.rhs
+		rhs_obj = model.rhs
 
 		# extrapolation periods
 		periods = 20
@@ -180,17 +169,19 @@ if __name__ == '__main__':
 		y_train = y_train.detach().numpy()
 
 		# learned discrete solution
-		model.ode.T          = periods*args.T
-		model.ode.num_steps  = periods*args.steps
-		t_learned, y_learned = model.ode.sequence(y0_train)
+		model.T          = periods*args.T
+		model.num_steps  = periods*args.steps
+		model.ind_out    = torch.arange(periods*args.steps+1)
+		t_learned, y_learned = model(y0_train, return_t=True)
 		t_learned = t_learned.detach().numpy()
 		y_learned = y_learned.detach().numpy()
 
 		# continuous solution with learned vector field
-		model.ode.T         = periods*args.T
-		model.ode.num_steps = periods*1000
-		model.ode.theta     = 0.5
-		t_learned_ode, y_learned_ode = model.ode.sequence(y0_train)
+		model.T         = periods*args.T
+		model.num_steps = periods*1000
+		model.theta     = 0.5
+		model.ind_out   = torch.arange(periods*1000+1)
+		t_learned_ode, y_learned_ode = model(y0_train, return_t=True)
 		t_learned_ode = t_learned_ode.detach().numpy()
 		y_learned_ode = y_learned_ode.detach().numpy()
 
