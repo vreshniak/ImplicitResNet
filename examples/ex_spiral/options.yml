@@ -1,0 +1,14 @@
+seed: 10
+
+codim: 1
+width: 10
+depth: 2
+sigma: relu
+
+init: rnd
+epochs: 1000
+lr: 1.e-2
+datasize: 400
+batch: -1
+
+mciters: 1
