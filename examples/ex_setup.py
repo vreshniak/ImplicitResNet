@@ -61,6 +61,8 @@ def parse_args():
 	if args.seed is None:
 		args.seed = randint(0,10000)
 
+	if args.T is None:
+		args.T = 1
 	if args.steps is None:
 		assert int(args.T)==args.T
 		args.steps = int(args.T)
@@ -198,7 +200,6 @@ def load_model(model, args, device=_cpu, location=None):
 		# 		load_dir = Path(paths['checkpoints'], file_name)
 
 	missing_keys, unexpected_keys = mod.load_state_dict(torch.load(load_dir, map_location=device))
-	mod.apply(lambda m: setattr(m,'theta',args.theta))
 	print('Mode: ', args.mode)
 	print('Load model from: ',load_dir)
 	print('\tmissing_keys:    ', missing_keys)
@@ -241,6 +242,8 @@ def plot_stab(theta, xlim=(-5,5), ylim=(-5,5), fname=None):
 		levels = [0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.7, 1.0, 1.3, 2, 5]
 	elif theta==1.0:
 		levels = [0.15, 0.2, 0.3, 0.5, 1.0, 2, 5]
+	else:
+		levels = [0.5, 0.8, 1.0, 1.5, 2, 3, 4, 5, 7, 10, 20]
 
 	# make mesh
 	xmesh = np.linspace(xlim[0], xlim[1], 200)
@@ -268,3 +271,12 @@ def plot_stab(theta, xlim=(-5,5), ylim=(-5,5), fname=None):
 		plt.savefig(fname, bbox_inches='tight')
 
 
+
+def savefig(name, format='pdf', aspect=None):
+	import matplotlib.pyplot as plt
+	plt.gca().axes.xaxis.set_visible(False)
+	plt.gca().axes.yaxis.set_visible(False)
+	plt.gca().axis('off')
+	if aspect is not None:
+		plt.gca().set_aspect('equal')
+	plt.savefig(name+'.%s'%(format), pad_inches=0.0, bbox_inches='tight')
