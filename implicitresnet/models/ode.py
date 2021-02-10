@@ -217,27 +217,6 @@ class ode_solver(torch.nn.Module, metaclass=ABCMeta):
 
 	########################################
 
-	# def trajectory(self, y0, t0=0):
-	# 	# returns lists of length (time points) of size (batch size, 1), (batch size, hidden dim)
-	# 	evolution = self.evolution
-	# 	self.evolution = True
-	# 	self.forward(y0, t0)
-	# 	self.evolution = evolution
-	# 	return list(self._t), list(self._y)
-
-	# def sequence(self, y0, t0=0):
-	# 	# returns tensors of shape (batch size, time points), (batch size, time points, hidden dim)
-	# 	evolution = self.evolution
-	# 	self.evolution = True
-	# 	self.forward(y0, t0)
-	# 	self.evolution = evolution
-	# 	if self._t[0].ndim==0:
-	# 		t = torch.stack(list(self._t))
-	# 	elif self._t[0].ndim==1:
-	# 		t = torch.stack(list(self._t), 1)
-	# 	else:
-	# 		raise ValueError("ode.sequence(): self._t must have 1 or 2 dimensions, got %d"%(self._t[0].ndim))
-	# 	return t, torch.stack(list(self._y), 1)
 
 	def forward(self, y0, t0=0, return_t=False):
 		if self.training or self._ind_out is not None:
