@@ -262,7 +262,7 @@ if __name__ == '__main__':
 
 			# evaluate model
 			for _ in range(10):
-				dataloader = torch.utils.data.DataLoader(dataset, batch_size=args.batch, shuffle=False)
+				dataloader = torch.utils.data.DataLoader(dataset, batch_size=1000, shuffle=False)
 				for batch_ndx, sample in enumerate(dataloader):
 					x, y = sample[0].to(_device), sample[1].cpu()
 					out_noise.append(torch.nn.functional.softmax(model(add_noise()(x,std)),dim=1).detach().cpu())

@@ -8,7 +8,7 @@ FOR %%m IN (train test) DO (
 
 FOR %%t IN (0.00 0.25 0.50 0.75 1.00) DO (
 	FOR %%m IN (train test) DO (
-		python ex_MNIST.py --name theta_%%t --mode %%m --theta %%t --stablim 0.2 1.0 1.2 --learn_scales --learn_shift
+		python ex_MNIST.py --name theta_%%t --mode %%m --theta %%t --stablim 0.2 1.2 1.5 --learn_scales --learn_shift
 	)
 )
 
