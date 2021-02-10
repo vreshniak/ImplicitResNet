@@ -4,19 +4,15 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from pathlib import Path
-
-import math
 import numpy as np
-import matplotlib as mpl
-import matplotlib.pyplot as plt
 
 import torch
 import torchvision
 from torch.utils.tensorboard import SummaryWriter
+import torch.autograd.profiler as profiler
 
+from implicitresnet import utils, theta_solver, regularized_ode_solver, rhs_conv2d
 import ex_setup
-import layers
-import utils
 
 
 
@@ -25,7 +21,8 @@ if __name__ == '__main__':
 	#########################################################################################
 
 
-	args = ex_setup.parse_args()
+	args  = ex_setup.parse_args()
+	paths = ex_setup.create_paths(args)
 	if args.seed is not None: torch.manual_seed(args.seed)
 
 
@@ -42,28 +39,35 @@ if __name__ == '__main__':
 	#########################################################################################
 
 
-	_device = ex_setup._cpu #ex_setup._gpu if torch.cuda.is_available() else ex_setup._cpu
+	_device = ex_setup._gpu if torch.cuda.is_available() else ex_setup._cpu
 	_dtype  = ex_setup._dtype
 
 
 	#########################################################################################
 	#########################################################################################
 	# Data
+
+
 	np.random.seed(10)
 	transform = torchvision.transforms.Compose([ torchvision.transforms.ToTensor() ]) #, torchvision.transforms.Normalize((0.1307,), (0.3081,))  ])
 
+	# original data
 	dataset     = torchvision.datasets.MNIST("./MNIST", train=True,  transform=transform, target_transform=None, download=True)
 	val_dataset = torchvision.datasets.MNIST("./MNIST", train=False, transform=transform, target_transform=None, download=True)
+	# move data to device
+	dataset     = torch.utils.data.TensorDataset(     dataset.data.unsqueeze(1).to(_device, dtype=_dtype)/255.,     dataset.targets.to(_device) )
+	val_dataset = torch.utils.data.TensorDataset( val_dataset.data.unsqueeze(1).to(_device, dtype=_dtype)/255., val_dataset.targets.to(_device) )
+	# subset of data
 	if args.datasize>0:
 		dataset     = torch.utils.data.Subset(dataset,     np.arange(args.datasize))
 		val_dataset = torch.utils.data.Subset(val_dataset, np.arange(args.datasize//6))
 	im_size = dataset[0][0].size()
 
-
 	# account for the unbalanced data
 	weight = np.zeros(10,)
 	for i in range(len(dataset)):
-		weight[dataset[i][1]] += 1
+		# weight[dataset[i][1]] += 1
+		weight[dataset[i][1].item()] += 1
 	weight = 1. / weight
 	weight = torch.from_numpy( weight/weight.sum() ).float().to(device=_device)
 
@@ -81,86 +85,159 @@ if __name__ == '__main__':
 	#########################################################################################
 	# NN model
 
-	########################################################
-	class ode_block(ex_setup.ode_block_base):
-		def __init__(self, im_shape):
-			super().__init__(args)
-			self.ode = layers.theta_solver( ex_setup.rhs_conv2d(im_shape, args), args.T, args.steps, args.theta, tol=args.tol )
-	########################################################
-
 
 	########################################################
-	class model(torch.nn.Module):
+	def ode_block(im_shape, theta=0.00, stability_limits=None, alpha={}):
+		rhs    = rhs_conv2d(im_shape, kernel_size=3, depth=2, T=args.T, num_steps=args.steps, power_iters=args.piters, learn_scales=args.learn_scales, learn_shift=args.learn_shift)
+		solver = theta_solver( rhs, args.T, args.steps, theta, tol=args.tol )
+		return regularized_ode_solver( solver, alpha, stability_limits, args.mciters )
+	########################################################
+
+	########################################################
+	class add_noise(torch.nn.Module):
 		def __init__(self):
 			super().__init__()
 
-			ch = args.codim+1
-			self.net = torch.nn.Sequential(
-				######################################
-				torch.nn.Conv2d(1, ch, 7, stride=2, padding=3, bias=False),			#chx14x14	[0]
-				torch.nn.MaxPool2d(3, stride=2),									#chx6x6		[1]
-				ode_block((ch,6,6)),												#chx6x6		[2]
-				######################################
-				torch.nn.Conv2d(ch, 2*ch, 3, stride=2, padding=1, bias=False),		#2chx3x3	[3]
-				ode_block((2*ch,3,3)),												#2chx3x3	[4]
-				######################################
-				torch.nn.Conv2d(2*ch, 4*ch, 3, stride=2, padding=1, bias=False),	#4chx2x2	[5]
-				ode_block((4*ch,2,2)),												#			[6]
-				######################################
-				# Classifier
-				torch.nn.AvgPool2d(2),												#4chx1x1	[7]
-				torch.nn.Flatten(),													#4chx1		[8]
-				torch.nn.Linear(in_features=4*ch, out_features=10, bias=True),		#10x1		[9]
-			)
+		def forward(self, y, std=args.noisesize):
+			return torch.clamp(y + std * torch.randn_like(y), 0, 1) if (self.training and std>0) else y
+	########################################################
 
-		def forward(self, x):
-			out = self.net(x.requires_grad_(True))
-			return out
+	########################################################
+	ch = args.codim+1
+	if args.name=='plain' or args.name=='1Lip':
+		model = torch.nn.Sequential(
+			######################################									#1x28x28	[input]
+			add_noise(),															#1x28x28	[0]
+			######################################
+			ode_block((1,28,28)),													#1x28x28	[1]
+			######################################
+			torch.nn.Conv2d(1, ch, 7, stride=2, padding=3, bias=False),				#chx14x14	[2]
+			torch.nn.MaxPool2d(3, stride=2),										#chx6x6		[3]
+			ode_block((ch,6,6)),													#chx6x6		[4]
+			######################################
+			torch.nn.Conv2d(ch, 2*ch, 3, stride=2, padding=1, bias=False),			#2chx3x3	[5]
+			ode_block((2*ch,3,3)),													#2chx3x3	[6]
+			######################################
+			torch.nn.Conv2d(2*ch, 4*ch, 3, stride=2, padding=1, bias=False),		#4chx2x2	[7]
+			ode_block((4*ch,2,2)),													#4chx2x2	[8]
+			######################################
+			# Classifier
+			torch.nn.AvgPool2d(2),													#4chx1x1	[9]
+			torch.nn.Flatten(),														#4ch		[10]
+			torch.nn.Linear(in_features=4*ch, out_features=10, bias=True),			#10			[11]
+		)
+	else:
+		model = torch.nn.Sequential(
+			######################################									#1x28x28	[input]
+			add_noise(),															#1x28x28	[0]
+			######################################
+			ode_block((1,28,28), args.theta, args.stablim, args.alpha),				#1x28x28	[1]
+			######################################
+			torch.nn.Conv2d(1, ch, 7, stride=2, padding=3, bias=False),				#chx14x14	[2]
+			torch.nn.MaxPool2d(3, stride=2),										#chx6x6		[3]
+			ode_block((ch,6,6), args.theta, args.stablim, args.alpha),				#chx6x6		[4]
+			######################################
+			torch.nn.Conv2d(ch, 2*ch, 3, stride=2, padding=1, bias=False),			#2chx3x3	[5]
+			ode_block((2*ch,3,3), args.theta, args.stablim, args.alpha),			#2chx3x3	[6]
+			######################################
+			torch.nn.Conv2d(2*ch, 4*ch, 3, stride=2, padding=1, bias=False),		#4chx2x2	[7]
+			# ode_block((4*ch,2,2), 0.00, [0.0,1.0,2.0], {}),							#4chx2x2	[8]
+			ode_block((4*ch,2,2), args.theta, args.stablim, args.alpha),			#4chx2x2	[8]
+			######################################
+			# Classifier
+			torch.nn.AvgPool2d(2),													#4chx1x1	[9]
+			torch.nn.Flatten(),														#4ch		[10]
+			torch.nn.Linear(in_features=4*ch, out_features=10, bias=True),			#10			[11]
+		)
 	########################################################
 
 
 
-
 	#########################################################################################
 	#########################################################################################
-	# init/train/plot model
+	# train/test model
 
 	# uncommenting this line will enable debug mode and lead to increased cost and memory leaking
 	# torch.autograd.set_detect_anomaly(True)
 
 
-	paths = ex_setup.create_paths(args)
+	model = ex_setup.load_model(model, args, _device)
 
-
-	model     = ex_setup.load_model(model(), args, _device)
-	optimizer = ex_setup.get_optimizer('adam', model, args.lr, wdecay=args.wdecay)
-	scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.7, patience=10, verbose=True, threshold=1.e-6, threshold_mode='rel', cooldown=10, min_lr=1.e-6, eps=1.e-8)
-	# scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=20, gamma=0.7, last_epoch=-1)
-	# lr_schedule = np.linspace(args.lr, args.lr/100, args.epochs)
-	# checkpoint={'epochs':1000, 'name':"models/"+script_name+"/sim_"+str(sim)+'_'+file_name[:]}
-	train_obj = utils.training_loop(model, dataset, val_dataset, args.batch, optimizer=optimizer, scheduler=scheduler, loss_fn=loss_fn, accuracy_fn=accuracy_fn, write_hist=False, history=False, checkpoint=None)
-
-
-	# #########################################################################################
-	# # torch.autograd.set_detect_anomaly(True)
 
 	if args.mode=="train":
-		assert args.epochs>0, 'number of epochs must be positive'
+		optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.alpha['wdecay'])
+		scheduler = utils.optim.EvenReductionLR(optimizer, lr_reduction=0.1, gamma=0.9, epochs=args.epochs, last_epoch=-1)
+		train_model = utils.TrainingLoop(model, loss_fn, dataset, args.batch, optimizer, val_dataset=val_dataset, scheduler=scheduler, accuracy_fn=accuracy_fn, val_freq=1, stat_freq=1)
+
+		# with profiler.profile(record_shapes=True,use_cuda=True) as prof:
 		writer = SummaryWriter(Path("logs",file_name))
-		losses = []
 
 		# save initial model and train
 		torch.save( model.state_dict(), Path(paths['checkpoints_0'],file_name) )
 		try:
-			losses.append(train_obj(args.epochs, writer=writer))
+			train_model(args.epochs, writer=writer)
 		except:
 			raise
 		finally:
 			torch.save( model.state_dict(), Path(paths['checkpoints'],file_name) )
 
 		writer.close()
+		# print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=10))
 
 	elif args.mode=="test":
+		import matplotlib.pyplot as plt
+		from implicitresnet.utils.spectral import eigenvalues, spectralnorm
+		#########################################################################################
+		fig_no = 0
+
+		images_output = "%s/%s"%(Path(paths['output'],'images'), args.name)
+
+		model.eval()
+
+
+		#########################################################################################
+		# plot spectrum
+		fig = plt.figure(fig_no); fig_no += 1
+
+		# evaluate spectrum
+		spectralnrm  = []
+		rhs_spectrum = []
+		x = dataset[:10][0]
+		for m in model:
+			if not isinstance(m, theta_solver):
+				spectralnrm.append( spectralnorm(m,x).mean().item() )
+			else:
+				spectrum_i = []
+				m.ind_out = torch.arange(m.num_steps+1)
+				odesol = m(x)
+				m.ind_out = None
+				for t in range(odesol.size(1)-1):
+					spectrum_i.append( eigenvalues( lambda x: m.rhs(t,x), (1-args.theta)*odesol[:,t,...]+args.theta*odesol[:,t+1,...]) )
+					spectralnrm.append(np.amax(ex_setup.theta_stab(spectrum_i[-1][:,0]+1j*spectrum_i[-1][:,1],args.theta)))
+				rhs_spectrum.append(np.concatenate(np.array(spectrum_i)))
+			x = m(x)
+
+		# plot eigenvalues
+		xmax = ymax = 4
+		ex_setup.plot_stab(args.theta, xlim=(-xmax,xmax), ylim=(-ymax,ymax))
+		for eigs in rhs_spectrum:
+			plt.plot(eigs[:,0], eigs[:,1], 'o', markersize=4) #, markerfacecolor='none')
+		plt.savefig(images_output+"_spectrum.jpg", bbox_inches='tight', pad_inches=0.0)
+
+		# save spectral norm of layers
+		header = 'layer-1'
+		for i in range(2,len(spectralnrm)): header+=',layer-%d'%(i)
+		fname = Path(paths['output_data'],('spectral_norm.txt'))
+		if not os.path.exists(fname):
+			with open(fname, 'w') as f:
+				np.savetxt( f, np.array(spectralnrm).reshape((1,-1)), fmt='%.2e', delimiter=',', header=header)
+		else:
+			with open(fname, 'a') as f:
+				np.savetxt( f, np.array(spectralnrm).reshape((1,-1)), fmt='%.2e', delimiter=',')
+
+
+		###############################################
+		# model response to corrupted images
 
 		def topk_acc(input, target, topk=(1,)):
 			"""Computes the precision@k for the specified values of k"""
@@ -179,80 +256,50 @@ if __name__ == '__main__':
 			return res
 
 
-		def add_noise(image, std=0.0):
-			if std==0:
-				return image
-			else:
-				return image + std * torch.randn_like(image)
-			# return image + std * (2*torch.rand_like(image)-1)
-			# img = image.detach()
-			# img[image==0] = img[image==0] + std * torch.rand_like(image).abs()[image==0]
-			# img[image==1] = img[image==1] - std * torch.rand_like(image).abs()[image==1]
-			# return img
-
-
-		#########################################################################################
-		#########################################################################################
-
-
-		model.eval()
-
-
-		###############################################
-		# model response to corrupted images
-
 		for std in [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]:
 			out_noise = []
 			labels    = []
 
-			dataloader = torch.utils.data.DataLoader(dataset, batch_size=args.batch, shuffle=False)
-			for batch_ndx, sample in enumerate(dataloader):
-				x, y = sample[0].to(_device), sample[1].cpu()
-				out_noise.append(torch.nn.functional.softmax(model(add_noise(x,std)),dim=1).detach().cpu())
-				labels.append(y)
+			# evaluate model
+			for _ in range(10):
+				dataloader = torch.utils.data.DataLoader(dataset, batch_size=args.batch, shuffle=False)
+				for batch_ndx, sample in enumerate(dataloader):
+					x, y = sample[0].to(_device), sample[1].cpu()
+					out_noise.append(torch.nn.functional.softmax(model(add_noise()(x,std)),dim=1).detach().cpu())
+					labels.append(y)
 
+			# evaluate accuracy
 			out_noise = torch.cat(out_noise)
 			labels    = torch.cat(labels).reshape((-1,1))
-
 			acc_noise = topk_acc(out_noise,labels,(1,2,3,4,5))
 
-			np.savetxt( Path(paths['output_data'],('acc_std%3.1f_theta%4.2f'%(std,args.theta)).replace('.','')+'.txt'), np.array(acc_noise).reshape((1,-1)), delimiter=',')
+			# save accuracy
+			header = 'theta'
+			for i in range(1,6): header+=',top-%d'%(i)
+			fname = Path(paths['output_data'],('acc_noise_std_%.2f.txt'%(std)))
+			if not os.path.exists(fname):
+				with open(fname, 'w') as f:
+					np.savetxt( f, np.array([args.theta]+acc_noise).reshape((1,-1)), fmt='%.2f', delimiter=',', header=header)
+			else:
+				with open(fname, 'a') as f:
+					np.savetxt( f, np.array([args.theta]+acc_noise).reshape((1,-1)), fmt='%.2f', delimiter=',')
 
 
-	# elif args.mode=="plot":
-	# 	from skimage.util import montage
-
-	# 	def add_noise(image, std=0.6):
-	# 		# return image + std * (2*torch.rand_like(image).to(image.dtype)-1)
-	# 		return image + std * torch.rand_like(image).to(image.dtype)
-
-	# 	model = get_model(args.seed)
-	# 	missing_keys, unexpected_keys = model.load_state_dict(torch.load(Path("checkpoints","init",file_name), map_location=cpu))
-	# 	# missing_keys, unexpected_keys = model.load_state_dict(torch.load(Path("initialization","0.00"), map_location=cpu))
-	# 	model.eval()
-
-	# 	model = model.net
-
-	# 	for image, label in dataset:
-	# 		fig_no = 0
-	# 		out_plain = image.reshape(1,*image.shape)
-	# 		out_noise = add_noise(out_plain)
-	# 		# original and noise image
-	# 		plt.figure(fig_no); fig_no += 1;
-	# 		plt.subplot(211); plt.imshow(out_plain.detach().numpy()[0,0,...], cmap='gray')
-	# 		plt.subplot(212); plt.imshow(out_noise.detach().numpy()[0,0,...], cmap='gray')
-	# 		# layer outputs
-	# 		old_l = 0
-	# 		for l in [1,2]: #[1,2,5,6,9,10]
-	# 			out_plain = model[old_l:l+1](out_plain)
-	# 			out_noise = model[old_l:l+1](out_noise); old_l = l+1
-	# 			out_channels = out_plain.shape[1]
-	# 			plt.figure(fig_no); fig_no += 1;
-	# 			plt.subplot(211); plt.imshow( montage( [out_plain.detach().numpy()[0,i-1,:,:] for i in range(1,out_channels+1)], grid_shape=(1,out_channels), multichannel=False ), cmap='gray')
-	# 			plt.subplot(212); plt.imshow( montage( [out_noise.detach().numpy()[0,i-1,:,:] for i in range(1,out_channels+1)], grid_shape=(1,out_channels), multichannel=False ), cmap='gray')
-	# 		print(model[old_l:](out_plain).argmax(dim=1).detach().numpy()[0], model[old_l:](out_noise).argmax(dim=1).detach().numpy()[0], label)
-	# 		plt.show()
-	# 		exit()
-
-
-
+		# ###############################################
+		# # output of layers
+		# # x = add_noise()(dataset[:1][0], 0.3)
+		# x = dataset[:1][0]
+		# plt.imshow(x[0,0,...].cpu().detach().numpy(), cmap='gray')
+		# plt.gca().axes.xaxis.set_visible(False)
+		# plt.gca().axes.yaxis.set_visible(False)
+		# plt.gca().axis('off')
+		# plt.savefig(images_output+"_layer_0_ch_0.jpg", bbox_inches='tight', pad_inches=0.0)
+		# for l, m in enumerate(model):
+		# 	if l>=3: break
+		# 	x = m(x)
+		# 	for ch in range(x.size(1)):
+		# 		plt.imshow(x[0,ch,...].cpu().detach().numpy(), cmap='gray')
+		# 		plt.gca().axes.xaxis.set_visible(False)
+		# 		plt.gca().axes.yaxis.set_visible(False)
+		# 		plt.gca().axis('off')
+		# 		plt.savefig(images_output+"_layer_%d_ch_%d.jpg"%(l+1,ch), bbox_inches='tight', pad_inches=0.0)

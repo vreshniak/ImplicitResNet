@@ -9,23 +9,116 @@
 \usepackage{xfrac}
 \usepackage{multirow}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\usepackage{csvsimple} % latex tables from csv
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\usepackage{tikz}
+\usepackage{pgfplots}
+\usepackage{pgfplotstable}
+\pgfplotsset{table/search path={output/data}}
+\pgfplotsset{compat=1.15}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\usepgfplotslibrary{statistics}
+\usetikzlibrary{positioning}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+% https://latex.org/forum/viewtopic.php?t=3970
+\makeatletter
+\newcommand*\ExpandableInput[1]{\@@input#1 }
+\makeatother
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 \begin{document}
 
+\pgfplotscreateplotcyclelist{divlist}{
+	{dashed,brown!80!black},
+	{brown!80!black},
+	{cyan!80!black},
+	{red},
+	{blue},
+	{orange},
+	{black}
+}
+
+
 \begin{table}[t]
-	\centering
-    \def\arraystretch{2.0}
+\centering
+\def\arraystretch{2.0}
 	\begin{tabular}{|c|c|c|c|c|c||c|c|c|c|c|}
 		\cline{1-11}
-		\multirow{2}{*}{\shortstack[c]{Noise\\ intensity\\ (std)}} & \multicolumn{5}{c|}{Top-1 accuracy}  & \multicolumn{5}{c|}{Top-2 accuracy}       \\ \cline{2-11}
-		         &  $\theta=0$  &  0.25  &  0.50  &  0.75  & 1.00 &  $\theta=0$  & 0.25  &  0.50  &  0.75  & 1.00 \\ \hline
-		\input{output/table.txt}
-		\hline
+		\multirow{2}{*}{\shortstack[c]{Noise\\ std}} & \multicolumn{5}{c||}{Top-1 accuracy}  & \multicolumn{5}{c|}{Top-2 accuracy} \\ \cline{2-11}
+		        &  $\theta=0$  &  0.25  &  0.50  &  0.75  & 1.00 &  $\theta=0$  & 0.25  &  0.50  &  0.75  & 1.00
+		\csvreader[column count=15, no head]{output/table.txt}%
+		{1=\one, 2=\two, 3=\three, 4=\four, 5=\five, 6=\six, 7=\seven, 8=\eight, 9=\nine, 10=\ten, 11=\eleven, 12=\twelve, 13=\thirteen, 14=\fourteen, 15=\fifteen}%
+		{\ifthenelse{\equal{\thecsvrow}{1}}{\\\hline}{\\} \one & \four & \five & \six & \seven & \eight &  \eleven & \twelve & \thirteen & \fourteen & \fifteen}
+		\\\hline
 	\end{tabular}
-\caption{Classifiaction accuracy for different levels of Gaussian noise corruption.}
-\label{tab:ex_4_noise}
+	\caption{Classifiaction accuracy for different levels of Gaussian noise corruption.}
+	\label{tab:ex_4_noise}
 \end{table}
+
+
+
+\begin{figure}[t]
+	\centering
+	\pgfplotsset{every tick label/.append style={font=\scriptsize}}
+
+	\begin{tikzpicture}
+		\begin{axis} [
+				%scale=\scale,
+				%scale only axis,
+				width=0.5\textwidth,
+				each nth point=1,
+				ymode = normal,
+				cycle list name = divlist,
+				xlabel = noise std,
+				title style={font=\small},
+				title=Mean accuracy ($10$ samples),
+				legend entries = {plain,1Lip,$\theta=0.00$,$\theta=0.25$,$\theta=0.50$,$\theta=0.75$,$\theta=1.00$},
+				very thick ]
+				\foreach \i in {1,...,7}
+					\addplot  table[header=false, col sep=comma, y index=\i] {output/table.txt};
+		\end{axis}
+	\end{tikzpicture}
+	\quad
+	% \begin{tikzpicture}
+	% 	\begin{axis} [
+	% 			%scale=\scale,
+	% 			%scale only axis,
+	% 			width=0.5\textwidth,
+	% 			each nth point=1,
+	% 			ymode = normal,
+	% 			cycle list name = divlist,
+	% 			xlabel = noise std,
+	% 			title style={font=\small},
+	% 			legend entries = {$\theta=0.00$,$\theta=0.25$,$\theta=0.50$,$\theta=0.75$,$\theta=1.00$},
+	% 			very thick ]
+	% 			\foreach \i in {6,...,10}
+	% 				\addplot  table[header=false, col sep=comma, y index=\i] {output/table.txt};
+	% 	\end{axis}
+	% \end{tikzpicture}
+	\begin{tikzpicture}
+		\pgfplotstableread[col sep=comma]{output/data/spectral_norm.txt}\loadedtable
+		\pgfplotstabletranspose\datatable{\loadedtable}
+		\begin{axis} [
+				%scale=\scale,
+				%scale only axis,
+				width=0.5\textwidth,
+				each nth point=1,
+				ymode = log,
+				cycle list name = divlist,
+				cycle list shift = 2,
+				xlabel = layer,
+				title style={font=\small},
+				title=Lipschitz constant,
+				% legend entries = {$\theta=0.00$,$\theta=0.25$,$\theta=0.50$,$\theta=0.75$,$\theta=1.00$},
+				% legend pos = outer north east,
+				very thick ]
+				\foreach \i in {3,...,7}
+					\addplot+ [only marks] table[y index=\i] {\datatable};
+		\end{axis}
+	\end{tikzpicture}
+\end{figure}
 
 
 \end{document}

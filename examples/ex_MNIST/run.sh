@@ -1,50 +1,17 @@
 #!/bin/bash
 
-# if [ $# -eq 0 ]; then
-# 	mode="train"
-# else
-# 	mode=$1
-# fi
-
-
-function run {
-	python ex_MNIST.py   \
-		--mode     $1    \
-		\
-		--seed     10    \
-		\
-		--theta    $2    \
-		--tol      1.e-6 \
-		--T        2     \
-		\
-		--codim    7     \
-		--depth    2     \
-		--sigma    relu  \
-		\
-		--scales   learn \
-		--piters   1     \
-		--eigs    -2.5 1 \
-		\
-		--init     rnd   \
-		--epochs   200   \
-		--lr       1.e-2 \
-		--datasize 1000  \
-		--batch    200   \
-		\
-		--aTV      0     \
-		--adiv     1.e-1 \
-		--mciters  1
-}
-
+for mode in train test; do
+	python ex_MNIST.py --name plain --mode $m --theta 0.0 --adiv 0.0 --piters 0
+	python ex_MNIST.py --name 1Lip  --mode $m --theta 0.0 --adiv 0.0 --piters 1
+done
 
 for mode in train test; do
-	for theta in 0.0 0.25 0.5 0.75 1.0; do
-		run $mode $theta
+	for theta in 0.10 0.25 0.50 0.75 1.00; do
+		python ex_MNIST.py --name theta_"$theta" --mode $mode --theta $theta --stablim 0.2 1.0 1.2 --learn_scales --learn_shift
 	done
 done
 
-
 python make_table.py
 pdflatex results.tex
-rm *.aux *.log
+rm *.aux *.log *.bak
 # open results.pdf
