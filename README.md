@@ -1,5 +1,5 @@
 # Robust learning with implicit residual networks
-### [paper](https://www.mdpi.com/2504-4990/3/1/3/htm#B27-make-03-00003)
+### [paper](https://www.mdpi.com/2504-4990/3/1/3)
 
 ## Requirements
 
