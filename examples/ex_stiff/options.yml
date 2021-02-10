@@ -1,0 +1,24 @@
+seed: 10
+
+theta: 0.5
+tol: 1.e-6
+T: 2
+steps: 20
+
+codim: 0
+width: 4
+depth: 2
+sigma: relu
+
+piters: 1
+eiglims: [-25, -15]
+
+init: rnd
+epochs: 25
+lr: 1.e-2
+datasize: 50
+datasteps: 1
+batch: 1
+
+aTV: 1.e-1
+mciters: 1

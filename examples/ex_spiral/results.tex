@@ -1,0 +1,94 @@
+\documentclass{article}
+\usepackage[margin=1in]{geometry}
+
+\pagestyle{empty}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\usepackage{amsmath, amssymb, amsfonts}
+%\usepackage{bbm} % \mathbbm
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\usepackage{color}
+\usepackage{xfrac}
+\usepackage{multicol}
+\usepackage{afterpage}
+\usepackage{ifthen}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% figures
+%\usepackage{wrapfig}
+%\usepackage[usestackEOL]{stackengine}
+%\usepackage[export]{adjustbox} % align figures
+% \usepackage{subcaption}
+% \captionsetup{compatibility=false}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% algorithms
+%\usepackage{listings}
+%\usepackage{algorithm}
+%\usepackage{algorithmic}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%\usepackage{makecell} % break lines in table cells
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\usepackage{tikz}
+\usepackage{pgfplots}
+\usepackage{pgfplotstable}
+\pgfplotsset{table/search path={output/data}}
+\pgfplotsset{compat=1.15}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\usepgfplotslibrary{statistics}
+\usetikzlibrary{positioning}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+% \DeclareMathOperator*{\argmin}{arg\,min}
+% \DeclareMathOperator{\Tr}{Tr}
+\graphicspath{{./output/images/}}
+
+
+\begin{document}
+
+\begin{figure}[t]
+	\includegraphics[width=0.19\textwidth]{plain-10_result.pdf}
+	\includegraphics[width=0.19\textwidth]{1Lip-10_result.pdf}
+	\includegraphics[width=0.19\textwidth]{2Lip-5-1Lip-5_result.pdf}
+	\includegraphics[width=0.19\textwidth]{10-0_result.pdf}
+	\includegraphics[width=0.19\textwidth]{5-5-0.00_result.pdf}
+	%%%%%%%
+	\\
+	\includegraphics[width=0.19\textwidth]{plain-10_result_linear.pdf}
+	\includegraphics[width=0.19\textwidth]{1Lip-10_result_linear.pdf}
+	\includegraphics[width=0.19\textwidth]{2Lip-5-1Lip-5_result_linear.pdf}
+	\includegraphics[width=0.19\textwidth]{10-0_result_linear.pdf}
+	\includegraphics[width=0.19\textwidth]{5-5-0.00_result_linear.pdf}
+	%%%%%%%
+	\\
+	\includegraphics[width=0.19\textwidth]{plain-10_spectrum_1.jpg}
+	\includegraphics[width=0.19\textwidth]{1Lip-10_spectrum_1.jpg}
+	\includegraphics[width=0.19\textwidth]{2Lip-5-1Lip-5_spectrum_1.jpg}
+	\includegraphics[width=0.19\textwidth]{10-0_spectrum_1.jpg}
+	\includegraphics[width=0.19\textwidth]{5-5-0.00_spectrum_1.jpg}
+	\\
+	\rule{0.19\textwidth}{0.1pt}
+	\rule{0.19\textwidth}{0.1pt}
+	\includegraphics[width=0.19\textwidth]{2Lip-5-1Lip-5_spectrum_2.jpg}
+	\rule{0.19\textwidth}{0.1pt}
+	\includegraphics[width=0.19\textwidth]{5-5-0.00_spectrum_2.jpg}
+    \caption{From left to right: plain-10, 1Lip-10, 2Lip-5-1Lip-5, 10-0, 5-5}
+\end{figure}
+
+
+\begin{itemize}
+	\item[-] plain-10: 10 layer resnet without spectral normalization
+	\item[-] 1Lip-10: 10 layer resnet with spectral normalization of the RHS
+	\item[-] 2Lip-5-1Lip-5: 10 layer resnet with with Lipshitz-2 RHS (5 layers) and Lipchitz-1 RHS (5 layers)
+	\item[-] 10-0: 10 layer resnet with unstable RHS ($\Re(\lambda) \in [-2,0]$)
+	\item[-] 5-5: 10 layer resnet with 5 unstable layers ($\Re(\lambda) \in [-2,0]$) and 5 Lipschitz-1 RHS layers
+\end{itemize}
+
+\paragraph{Dataset references}
+\begin{enumerate}
+	\item Lang, Kevin J., and Michael J. Witbrock. "Learning to tell two spirals apart." Proceedings of the 1988 connectionist models summer school. No. 1989. 1988.
+	\item Flake, Gary William. "Square unit augmented radially extended multilayer perceptrons." Neural Networks: Tricks of the Trade. Springer, Berlin, Heidelberg, 1998. 145-163.
+\end{enumerate}
+
+
+
+\end{document}

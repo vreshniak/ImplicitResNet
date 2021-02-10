@@ -4,17 +4,14 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from pathlib import Path
-
 import numpy as np
-import matplotlib.pyplot as plt
-from mpl_toolkits import mplot3d
+import pickle
 
 import torch
 from torch.utils.tensorboard import SummaryWriter
 
+from implicitresnet import utils, theta_solver, regularized_ode_solver, rhs_mlp
 import ex_setup
-import layers
-import utils
 
 
 
@@ -22,15 +19,20 @@ if __name__ == '__main__':
 	#########################################################################################
 	#########################################################################################
 
-	args = ex_setup.parse_args()
+
+	args  = ex_setup.parse_args()
+	paths = ex_setup.create_paths(args)
 	if args.seed is not None: torch.manual_seed(args.seed)
+
 
 	#########################################################################################
 	#########################################################################################
 	# compose file name
 
+
 	file_name   = ex_setup.make_name(args)
 	script_name = sys.argv[0][:-3]
+
 
 	#########################################################################################
 	#########################################################################################
@@ -97,7 +99,6 @@ if __name__ == '__main__':
 				return torch.cat( (x, val*torch.ones((x.size(0),args.codim))), 1 )
 	########################################################
 
-
 	########################################################
 	# last component as the function value
 	class output(torch.nn.Module):
@@ -108,69 +109,50 @@ if __name__ == '__main__':
 			return x[:,-1:]
 	########################################################
 
-
 	########################################################
-	class ode_block(ex_setup.ode_block_base):
-		def __init__(self):
-			super().__init__(args)
-			self.ode = layers.theta_solver( ex_setup.rhs_mlp(1, args), args.T, args.steps, args.theta, tol=args.tol )
-	########################################################
-
-
-	########################################################
-	class model(torch.nn.Module):
-		def __init__(self):
-			super().__init__()
-			self.net = torch.nn.Sequential( augment(), ode_block(), output() )
-
-		def forward(self, x):
-			return self.net(x.requires_grad_(True))
+	def ode_block():
+		dim = 1 + args.codim
+		rhs_steps = args.steps if args.alpha['TV']>=0 else 1
+		rhs    = rhs_mlp(dim, args.width, args.depth, T=args.T, num_steps=rhs_steps, activation=args.sigma, learn_scales=args.learn_scales, learn_shift=args.learn_shift)
+		solver = theta_solver( rhs, args.T, args.steps, args.theta, tol=args.tol )
+		return regularized_ode_solver( solver, args.alpha, mciters=args.mciters, p=2 )
 	########################################################
 
+	model = torch.nn.Sequential( augment(), ode_block(), output() )
 
 
 	#########################################################################################
 	#########################################################################################
-	# init/train/plot model
+	# init/train/test model
 
 	# uncommenting this line will enable debug mode and lead to increased cost and memory leaking
 	# torch.autograd.set_detect_anomaly(True)
 
 
-	paths = ex_setup.create_paths(args)
+	model = ex_setup.load_model(model, args, _device)
 
 
-	model     = ex_setup.load_model(model(), args, _device)
-	optimizer = ex_setup.get_optimizer('adam', model, args.lr, wdecay=args.wdecay)
-	scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.7, patience=50, verbose=True, threshold=1.e-4, threshold_mode='rel', cooldown=50, min_lr=1.e-6, eps=1.e-8)
-	# scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=500, gamma=0.7, last_epoch=-1)
-	# lr_schedule = np.linspace(args.lr, args.lr/100, args.epochs)
-	# checkpoint={'epochs':1000, 'name':"models/"+script_name+"/sim_"+str(sim)+'_'+file_name[:]}
-	train_obj = utils.training_loop(model, dataset, val_dataset, args.batch, optimizer=optimizer, scheduler=scheduler, loss_fn=loss_fn, write_hist=False, history=False, checkpoint=None)
+	if args.mode=="train":
+		optimizer   = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.alpha['wdecay'])
+		scheduler   = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.7, patience=50, verbose=True, threshold=1.e-4, threshold_mode='rel', cooldown=50, min_lr=1.e-6, eps=1.e-8)
+		train_model = utils.TrainingLoop(model, loss_fn, dataset, args.batch, optimizer, val_dataset=val_dataset, scheduler=scheduler, val_freq=50, stat_freq=10)
 
+		# write options to file
+		if os.path.exists(Path('output','name2args')):
+			with open(Path('output','name2args'),'rb') as f:
+				name2args = pickle.load(f)
+			name2args[file_name] = args
+		else:
+			name2args = {file_name:args}
+		with open(Path('output','name2args'),'wb') as f:
+			pickle.dump(name2args, f)
 
-	if args.mode=='init':
-		writer = SummaryWriter(Path('logs','init',file_name))
-
-		# initialize with analytic continuation (annealing) of theta
-		for theta in np.linspace(0,1,101):
-			model.apply(lambda m: setattr(m,'theta',theta))
-			train_obj(50, writer=writer)
-			torch.save( model.state_dict(), Path(paths['initialization'],'%4.2f'%(theta)) )
-			print('Saved to: ', Path(paths['initialization'],'%4.2f'%(theta)))
-			# torch.save( model.state_dict(), Path("checkpoints","init_"+args.prefix,"%4.2f"%(theta)) )
-
-		writer.close()
-
-	elif args.mode=="train":
-		assert args.epochs>0, 'number of epochs must be positive'
 		writer = SummaryWriter(Path("logs",file_name))
-		losses = []
 
+		# save initial model and train
+		torch.save( model.state_dict(), Path(paths['checkpoints_0'],file_name) )
 		try:
-			# save initial model and train
-			torch.save( model.state_dict(), Path(paths['checkpoints_0'],file_name) )
-			losses.append(train_obj(args.epochs, writer=writer))
+			train_model(args.epochs, writer=writer)
 		except:
 			raise
 		finally:
@@ -178,199 +160,80 @@ if __name__ == '__main__':
 
 		writer.close()
 
-	elif args.mode=="plot":
+	elif args.mode=="test":
+		import matplotlib.pyplot as plt
+		from matplotlib.widgets import Slider
+		from implicitresnet.utils.spectral import eigenvalues, spectralnorm
+		#########################################################################################
 		fig_no = 0
 
+		# images_output = ("%s/th%4.2f_T%d_data%d_adiv%4.2f"%(Path(paths['output'],'images'), args.theta, args.T, args.datasize, args.adiv)).replace('.','')
+		images_output = "%s/%s"%(Path(paths['output'],'images'), args.name)
 
-		images_output = ("%s/th%4.2f_T%d_data%d_adiv%4.2f"%(Path(paths['output'],'images'), args.theta, args.T, args.datasize, args.adiv)).replace('.','')
-
-
-		###############################################
-		# load model
-		# model = ex_setup.load_model(model(), args, _device)
 		model.eval()
 
+		rhs_obj = model[1].rhs
 
-		rhs_obj = model.net[1].ode.rhs
-
-		with np.printoptions(precision=2, suppress=True):
-			print("scales: ", rhs_obj.scales[0].detach().numpy())
-
-
-		###############################################
+		#########################################################################################
 		# prepare data
 
 		# test data
 		ntest = 200
 		xtest = np.linspace(-6, 6, ntest).reshape((ntest,1))
-		ytrue = fun(xtest)
 
-		# propagation of train data through layers
-		ytrain0 = model.net[0](torch.from_numpy(xtrain).float())
-		ytrain1 = model.net[1](ytrain0, evolution=True)
-		# for _ in range(2):
-		# 	ytrain1 = torch.cat((ytrain1, model.net[1](ytrain1[-1], evolution=True)))
-		# ytrain11 = torch.cat((ytrain1, model.net[1](ytrain1[-1], evolution=True)))
-		ytrain2 = model.net[2](ytrain1[-1])
+		model_output_train = model(torch.from_numpy(xtrain).float()).detach().numpy()
+		model_output_test  = model(torch.from_numpy(xtest).float()).detach().numpy()
 
-		# propagation of test data through layers
-		ytest0 = model.net[0](torch.from_numpy(xtest).float())
-		ytest1 = model.net[1](ytest0, evolution=True)
-		ytest2 = model.net[2](ytest1[-1])
+		# ode_output_train = [ y.detach().numpy() for y in model[1].trajectory( model[0](torch.from_numpy(xtrain).float()))[1] ]
+		# ode_output_test  = [ y.detach().numpy() for y in model[1].trajectory( model[0](torch.from_numpy(xtest).float()) )[1] ]
+		model[1].ind_out = torch.arange(args.steps+1)
+		ode_output_train = [ y.detach().numpy() for y in model[1]( model[0](torch.from_numpy(xtrain).float())).movedim(0,1) ]
+		ode_output_test  = [ y.detach().numpy() for y in model[1]( model[0](torch.from_numpy(xtest).float()) ).movedim(0,1) ]
 
-		# upper bound
 		std = 0.2
-		yup0 = model.net[0](torch.from_numpy(xtest).float(), std)
-		yup1 = model.net[1](yup0, evolution=True)
-		yup2 = model.net[2](yup1[-1])
-		ydown0 = model.net[0](torch.from_numpy(xtest).float(), -std)
-		ydown1 = model.net[1](ydown0, evolution=True)
-		ydown2 = model.net[2](ydown1[-1])
-
-		# convert to numpy arrays
-		ytest0 = ytest0.detach().numpy()
-		ytest1 = ytest1.detach().numpy()
-		ytest2 = ytest2.detach().numpy()
-		ytrain0 = ytrain0.detach().numpy()
-		ytrain1 = ytrain1.detach().numpy()
-		ytrain2 = ytrain2.detach().numpy()
-		yup0 = yup0.detach().numpy()
-		yup1 = yup1.detach().numpy()
-		yup2 = yup2.detach().numpy()
-		ydown0 = ydown0.detach().numpy()
-		ydown1 = ydown1.detach().numpy()
-		ydown2 = ydown2.detach().numpy()
-
-		# ytrain11 = ytrain11.detach().numpy()
-
+		ode_output_up    = [ y.detach().numpy() for y in model[1]( model[0](torch.from_numpy(xtest).float(), std)).movedim(0,1) ]
+		ode_output_down  = [ y.detach().numpy() for y in model[1]( model[0](torch.from_numpy(xtest).float(),-std)).movedim(0,1) ]
+		model[1].ind_out = None
 
 		###############################################
-		# plot function
-		fig = plt.figure(fig_no); fig_no += 1
+		# # plot function
+		# fig = plt.figure(fig_no); fig_no += 1
 
-		# plt.plot(xplot,ytrue)
-		plt.plot(xtest, ytest2)
-		plt.plot(xtrain, ytrain,'o')
+		# plt.plot(xtest,  model_output_test)
+		# plt.plot(xtrain, ytrain,'o')
 		# plt.show()
 
-		# np.savetxt( "out/data"+str(args.datasize)+"_ytrain"+".txt", np.hstack((xtrain,ytrain)), delimiter=',')
-		# np.savetxt( data_name+"_ytest.txt", np.hstack((xtest,ytest2)), delimiter=',')
-
 
 		###############################################
-		# evaluate spectrum
+		fig = plt.figure(fig_no); fig_no += 1
 
+		# evaluate spectrum
 		spectrum_train = []
 		spectrum_test  = []
-		xmax = ymax = 3
-		# for t in range(args.T+1):
-		for t in range(len(ytrain1)):
-			spectrum_train.append( rhs_obj.spectrum(t, ytrain1[t]) )
+		xmax = ymax = 4
+		for t in range(len(ode_output_train)-1):
+			y = (1-args.theta) * ode_output_train[t] + args.theta * ode_output_train[t+1]
+			spectrum_train.append( eigenvalues( lambda x: rhs_obj(t,x), torch.from_numpy(y) ) )
 			xmax = max(np.amax(np.abs(spectrum_train[-1][:,0])),xmax)
 			ymax = max(np.amax(np.abs(spectrum_train[-1][:,1])),ymax)
 
-			spectrum_test.append( rhs_obj.spectrum(t,ytest1[t]) )
+			y = (1-args.theta) * ode_output_test[t] + args.theta * ode_output_test[t+1]
+			spectrum_test.append( eigenvalues( lambda x: rhs_obj(t,x), torch.from_numpy(y) ) )
 			xmax = max(np.amax(np.abs(spectrum_test[-1][:,0])),xmax)
 			ymax = max(np.amax(np.abs(spectrum_test[-1][:,1])),ymax)
-		spectrum_train = np.array(spectrum_train)
-		spectrum_test  = np.array(spectrum_test)
-
-		# np.savetxt( data_name+"_eig1.txt", np.sqrt(spectrum_test[-1,1::2,0]**2+spectrum_test[-1,1::2,1]**2), delimiter=',')
-		# np.savetxt( data_name+"_eig2.txt", np.sqrt(spectrum_test[-1,::2,0]**2+spectrum_test[-1,::2,1]**2), delimiter=',')
-
 		spectrum_train = np.concatenate(spectrum_train)
 		spectrum_test  = np.concatenate(spectrum_test)
 
-		# np.savetxt( data_name+"_eig_train.txt", np.concatenate(spectrum_train), delimiter=',')
-		# np.savetxt( data_name+"_eig_test.txt",  np.concatenate(spectrum_test),  delimiter=',')
-
-		###############################################
-		# plot stability function
-		fig = plt.figure(fig_no); fig_no += 1
-
-		theta_stab = lambda z, theta: abs((1+(1-theta)*z)/(1-theta*z))
-
-
-		stab_val_train = theta_stab(spectrum_train[:,0]+1j*spectrum_train[:,1], args.theta)
-		stab_val_test  = theta_stab(spectrum_test[:,0]+1j*spectrum_test[:,1],   args.theta)
-		# plt.hist( stab_val_train, bins='auto' )
-		plt.hist( stab_val_test, bins='auto', histtype='step' )
-		# val, edges, _ = plt.hist( stab_val_test, bins='auto', histtype='step' )
-		# val = val + [val[-1]]
-
-		# np.savetxt( data_name+"_stab_fun_train.txt", np., delimiter=',')
-
-		# np.savetxt( data_name+"_stab_fun_train.txt", stab_val_train, delimiter=',')
-		# np.savetxt( data_name+"_stab_fun_test.txt",  stab_val_test, delimiter=',')
-
-
-		###############################################
 		# plot spectrum
-		fig = plt.figure(fig_no); fig_no += 1
-
-		def plot_stab(theta, xlim=(-5,5), ylim=(-5,5), fname=None):
-			# omit zero decimals
-			class nf(float):
-				def __repr__(self):
-					s = f'{self:.2f}'
-					if s[-1]+s[-2] == '00':
-						return f'{self:.0f}'
-					elif s[-1] == '0':
-						return f'{self:.1f}'
-					else:
-						return s
-			no_zero = lambda x: 1.e-6 if x==0 else x
-
-			if theta==0.0:
-				levels = [0.5, 1, 2, 3, 4, 5, 6, 7]
-			elif theta==0.25:
-				levels = [0.5, 0.8, 1.0, 1.5, 2, 3, 4, 5, 7, 10, 20]
-			elif theta==0.50:
-				levels = [0.14, 0.33, 0.5, 0.71, 0.83, 1.0, 1.2, 1.4, 2, 3, 7]
-			elif theta==0.75:
-				levels = [0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.7, 1.0, 1.3, 2, 5]
-			elif theta==1.0:
-				levels = [0.15, 0.2, 0.3, 0.5, 1.0, 2, 5]
-
-			# make mesh
-			xmesh = np.linspace(xlim[0], xlim[1], 200)
-			ymesh = np.linspace(ylim[0], ylim[1], 200)
-			X,Y   = np.meshgrid(xmesh, ymesh)
-
-			# evaluate stability function on the mesh
-			Z = theta_stab(X+1j*Y, theta)
-
-			# plt.axhline(y=0, color='black')
-			# plt.axvline(x=0, color='black')
-			ax = plt.gca()
-			ax.set_aspect('equal', adjustable='box')
-			plt.contourf(X,Y,Z, levels=[0,1], colors='0.6')
-
-			cs = plt.contour(X,Y,Z, levels=levels, colors='black')
-			cs.levels = [nf(val) for val in cs.levels]
-			ax.clabel(cs, cs.levels, inline=True, fmt=r'%r', fontsize=15)
-
-			if fname is not None:
-				plt.savefig(fname, bbox_inches='tight')
-
-		plot_stab(args.theta, xlim=(-xmax,xmax), ylim=(-ymax,ymax))
-
-		# d = spectrum_test.shape[0] // len(ytrain1)
-		# for t in range(len(ytrain1)):
-		# 	plt.plot(spectrum_test[(t-1)*d:t*d,0],  spectrum_test[(t-1)*d:t*d,1], 'o', markersize=10-1.8*t, alpha=(t+1)/len(ytrain1)) #, markerfacecolor='none')
-		# 	# plt.plot(spectrum_train[(t-1)*d:t*d,0], spectrum_train[(t-1)*d:t*d,1],'ro', markersize=8-0.5*t, alpha=(t+1)/(args.T+1))
+		ex_setup.plot_stab(args.theta, xlim=(-xmax,xmax), ylim=(-ymax,ymax))
 		plt.plot(spectrum_test[:,0],  spectrum_test[:,1], 'bo', markersize=4) #, markerfacecolor='none')
 		plt.plot(spectrum_train[:,0], spectrum_train[:,1],'ro', markersize=4)
-
-		plt.gca().axes.xaxis.set_visible(False)
-		plt.gca().axes.yaxis.set_visible(False)
-		plt.gca().axis('off')
 		plt.savefig(images_output+"_spectrum.pdf", bbox_inches='tight', pad_inches=0.0)
 
 
 		###############################################
-		# plot vector field
-		from matplotlib.widgets import Slider
+		# evaluate vector field
+		fig = plt.figure(fig_no); fig_no += 1
 
 		fig = plt.figure(fig_no); fig_no += 1
 		plot_ax   = plt.axes([0.1, 0.2, 0.8, 0.65])
@@ -379,69 +242,72 @@ if __name__ == '__main__':
 		# vector fields
 		X = np.linspace(-7, 7, 25)
 		Y = np.linspace(-2, 2, 25)
-		# X = np.linspace(np.amin(ytest1[...,0]),     np.amax(ytest1[...,0]),     25)
-		# Y = np.linspace(np.amin(ytest1[...,1]) - 1, np.amax(ytest1[...,1]) + 1, 25)
 		X,Y = np.meshgrid(X,Y)
-		XY = np.hstack((X.reshape(-1,1), Y.reshape(-1,1)))
-		# X = ytrain1[...,0].reshape((-1,1))
-		# Y = ytrain1[...,1].reshape((-1,1))
-		# XY = np.hstack((X, Y))
-		UV = []
-		for t in range(len(ytrain1)):
+		XY  = np.hstack((X.reshape(-1,1), Y.reshape(-1,1)))
+		UV  = []
+		for t in range(len(ode_output_train)):
 			UV.append(rhs_obj(t, torch.from_numpy(XY).float()).detach().numpy())
 		UV = np.array(UV)
 
 
-		def plot_step(t, ax=plot_ax):
-			ax.clear()
-			if t<args.T:
-				ax.quiver(X, Y, UV[t][:,0], UV[t][:,1], angles='xy')
-				# ax.quiver(X, Y, (1-args.theta)*UV[t][:,0] + args.theta*UV[t+1][:,0], (1-args.theta)*UV[t][:,1] + args.theta*UV[t+1][:,1])
-				############
-				# connecting lines
-				for point in range(ytrain1.shape[1]):
-					xx = [ ytrain1[t,point,0], ytrain1[t+1,point,0] ]
-					yy = [ ytrain1[t,point,1], ytrain1[t+1,point,1] ]
-					ax.annotate("", xy=(xx[1], yy[1]), xytext=(xx[0],yy[0]), arrowprops=dict(arrowstyle="->"))
-					# plot_ax.plot(xx, yy, '-b')
-				############
-				ax.plot(ytest1[t,:,0],    ytest1[t,:,1],    '-r')
-				ax.plot(ytest1[t+1,:,0],  ytest1[t+1,:,1],  '-b')
-				ax.plot(ytrain1[t,:,0],   ytrain1[t,:,1],   '.r')
-				ax.plot(ytrain1[t+1,:,0], ytrain1[t+1,:,1], '.b')
-				############
-				ax.set_xlim(np.amin(X),np.amax(X))
-				ax.set_ylim(np.amin(Y),np.amax(Y))
-			elif t==args.T:
-				ax.quiver(X, Y, UV[t-1][:,0], UV[t-1][:,1], angles='xy')
-				ax.plot(ytest1[t,:,0], ytest1[t,:,1], '-b')
-				ax.set_xlim(np.amin(X),np.amax(X))
-				ax.set_ylim(np.amin(Y),np.amax(Y))
-			fig.canvas.draw_idle()
+		# ###############################################
+		# # plot vector field and trajectories
+		# fig = plt.figure(fig_no); fig_no += 1
 
-		# initial plot
-		plot_step(0)
-		# create the slider
-		a_slider = Slider( slider_ax, label='step', valmin=0, valmax=len(ytrain1)-1, valinit=0, valstep=1 )
-		def update(step):
-			plot_step(int(step))
-		a_slider.on_changed(update)
+		# def plot_step(t, ax=plot_ax):
+		# 	ax.clear()
+		# 	if t<args.T:
+		# 		ax.quiver(X, Y, UV[t][:,0], UV[t][:,1], angles='xy')
+		# 		# ax.quiver(X, Y, (1-args.theta)*UV[t][:,0] + args.theta*UV[t+1][:,0], (1-args.theta)*UV[t][:,1] + args.theta*UV[t+1][:,1])
+		# 		############
+		# 		# connecting lines
+		# 		for point in range(len(ode_output_train)):
+		# 			xx = [ ode_output_train[t][point,0], ode_output_train[t+1][point,0] ]
+		# 			yy = [ ode_output_train[t][point,1], ode_output_train[t+1][point,1] ]
+		# 			ax.annotate("", xy=(xx[1], yy[1]), xytext=(xx[0],yy[0]), arrowprops=dict(arrowstyle="->"))
+		# 			# plot_ax.plot(xx, yy, '-b')
+		# 		############
+		# 		ax.plot(ode_output_test[t][:,0],    ode_output_test[t][:,1],    '-r')
+		# 		ax.plot(ode_output_test[t+1][:,0],  ode_output_test[t+1][:,1],  '-b')
+		# 		ax.plot(ode_output_train[t][:,0],   ode_output_train[t][:,1],   '.r')
+		# 		ax.plot(ode_output_train[t+1][:,0], ode_output_train[t+1][:,1], '.b')
+		# 		############
+		# 		ax.set_xlim(np.amin(X),np.amax(X))
+		# 		ax.set_ylim(np.amin(Y),np.amax(Y))
+		# 	elif t==args.T:
+		# 		ax.quiver(X, Y, UV[t-1][:,0], UV[t-1][:,1], angles='xy')
+		# 		ax.plot(ode_output_test[t][:,0], ode_output_test[t][:,1], '-b')
+		# 		ax.set_xlim(np.amin(X),np.amax(X))
+		# 		ax.set_ylim(np.amin(Y),np.amax(Y))
+		# 	fig.canvas.draw_idle()
+
+		# # initial plot
+		# plot_step(0)
+		# # create the slider
+		# a_slider = Slider( slider_ax, label='step', valmin=0, valmax=len(ode_output_train)-1, valinit=0, valstep=1 )
+		# def update(step):
+		# 	plot_step(int(step))
+		# a_slider.on_changed(update)
+		# plt.show()
 
 
+		###############################################
+		# plot spread of the solution
 		fig = plt.figure(fig_no); fig_no += 1
+
 		plt.quiver(X, Y, UV[0][:,0], UV[0][:,1], angles='xy')
-		for t in range(len(ytrain1)-1):
-			for point in range(ytrain1.shape[1]):
-				xx = [ ytrain1[t,point,0], ytrain1[t+1,point,0] ]
-				yy = [ ytrain1[t,point,1], ytrain1[t+1,point,1] ]
+		for t in range(len(ode_output_train)-1):
+			for point in range(ode_output_train[t].shape[0]):
+				xx = [ ode_output_train[t][point,0], ode_output_train[t+1][point,0] ]
+				yy = [ ode_output_train[t][point,1], ode_output_train[t+1][point,1] ]
 				plt.plot(xx, yy, '-k', linewidth=1.5)
 				plt.gca().annotate("", xy=(xx[1], yy[1]), xytext=(xx[0],yy[0]), arrowprops=dict(arrowstyle="->"))
-		plt.fill( np.concatenate((ydown1[0,:,0], yup1[0,-1::-1,0])),  np.concatenate((ydown1[0,:,1], yup1[0,-1::-1,1])),  'b', alpha=0.4 )
-		plt.fill( np.concatenate((ydown1[-1,:,0],yup1[-1,-1::-1,0])), np.concatenate((ydown1[-1,:,1],yup1[-1,-1::-1,1])), 'r', alpha=0.4 )
-		plt.plot(ytest1[0,:,0],   ytest1[0,:,1],   '-b', linewidth=2.5)
-		plt.plot(ytest1[-1,:,0],  ytest1[-1,:,1],  '-r', linewidth=2.5)
-		plt.plot(ytrain1[0,:,0],  ytrain1[0,:,1],  '.b', markersize=8)
-		plt.plot(ytrain1[-1,:,0], ytrain1[-1,:,1], '.r', markersize=8)
+		plt.fill( np.concatenate((ode_output_down[0][:,0], ode_output_up[0][-1::-1,0])),  np.concatenate((ode_output_down[0][:,1], ode_output_up[0][-1::-1,1])),  'b', alpha=0.4 )
+		plt.fill( np.concatenate((ode_output_down[-1][:,0],ode_output_up[-1][-1::-1,0])), np.concatenate((ode_output_down[-1][:,1],ode_output_up[-1][-1::-1,1])), 'r', alpha=0.4 )
+		plt.plot(ode_output_test[0][:,0],   ode_output_test[0][:,1],   '-b', linewidth=2.5)
+		plt.plot(ode_output_test[-1][:,0],  ode_output_test[-1][:,1],  '-r', linewidth=2.5)
+		plt.plot(ode_output_train[0][:,0],  ode_output_train[0][:,1],  '.b', markersize=8)
+		plt.plot(ode_output_train[-1][:,0], ode_output_train[-1][:,1], '.r', markersize=8)
 		plt.xlim(-7,7)
 		plt.ylim(-2,2)
 		# plt.plot(ytrain11[-1,:,0], ytrain11[-1,:,1], '.g', markersize=4)
@@ -449,32 +315,3 @@ if __name__ == '__main__':
 		plt.gca().axes.yaxis.set_visible(False)
 		plt.gca().axis('off')
 		plt.savefig(images_output+"_traj.pdf", pad_inches=0.0, bbox_inches='tight')
-
-
-
-		# plt.show()
-
-
-		# fig = plt.figure(fig_no); fig_no += 1
-		# for t in range(args.T):
-		# 	plot_step(t, plt.gca())
-		# 	plt.savefig(data_name+"_step"+str(t)+".pdf", bbox_inches='tight')
-
-
-		###############################################
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

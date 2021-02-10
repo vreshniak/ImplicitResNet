@@ -44,64 +44,64 @@
 
 
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% test if imagefile exists and redefine \includegraphics to not fail
+% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% % test if imagefile exists and redefine \includegraphics to not fail
 
-\makeatletter % changes the catcode of @ to 11
-\newif\ifgraphicexist
+% \makeatletter % changes the catcode of @ to 11
+% \newif\ifgraphicexist
 
-\catcode`\*=11
-\newcommand\imagetest[1]{%
-	\begingroup
-		\global\graphicexisttrue
-			\let\input@path\Ginput@path
-		\filename@parse{#1}%
-		\ifx\filename@ext\relax
-			\@for\Gin@temp:=\Gin@extensions\do{%
-				\ifx\Gin@ext\relax
-					\Gin@getbase\Gin@temp
-				\fi}%
-		\else
-			\Gin@getbase{\Gin@sepdefault\filename@ext}%
-			\ifx\Gin@ext\relax
-				\global\graphicexistfalse
-				\def\Gin@base{\filename@area\filename@base}%
-				\edef\Gin@ext{\Gin@sepdefault\filename@ext}%
-			\fi
-		\fi
-		\ifx\Gin@ext\relax
-			\global\graphicexistfalse
-		\else
-			\@ifundefined{Gin@rule@\Gin@ext}%
-				{\global\graphicexistfalse}%
-				{}%
-		\fi
-		\ifx\Gin@ext\relax
-			\gdef\imageextension{unknown}%
-		\else
-			\xdef\imageextension{\Gin@ext}%
-		\fi
-	\endgroup
-	\ifgraphicexist
-		\expandafter \@firstoftwo
-	\else
-		\expandafter \@secondoftwo
-	\fi
-}
-\catcode`\*=12
+% \catcode`\*=11
+% \newcommand\imagetest[1]{%
+% 	\begingroup
+% 		\global\graphicexisttrue
+% 			\let\input@path\Ginput@path
+% 		\filename@parse{#1}%
+% 		\ifx\filename@ext\relax
+% 			\@for\Gin@temp:=\Gin@extensions\do{%
+% 				\ifx\Gin@ext\relax
+% 					\Gin@getbase\Gin@temp
+% 				\fi}%
+% 		\else
+% 			\Gin@getbase{\Gin@sepdefault\filename@ext}%
+% 			\ifx\Gin@ext\relax
+% 				\global\graphicexistfalse
+% 				\def\Gin@base{\filename@area\filename@base}%
+% 				\edef\Gin@ext{\Gin@sepdefault\filename@ext}%
+% 			\fi
+% 		\fi
+% 		\ifx\Gin@ext\relax
+% 			\global\graphicexistfalse
+% 		\else
+% 			\@ifundefined{Gin@rule@\Gin@ext}%
+% 				{\global\graphicexistfalse}%
+% 				{}%
+% 		\fi
+% 		\ifx\Gin@ext\relax
+% 			\gdef\imageextension{unknown}%
+% 		\else
+% 			\xdef\imageextension{\Gin@ext}%
+% 		\fi
+% 	\endgroup
+% 	\ifgraphicexist
+% 		\expandafter \@firstoftwo
+% 	\else
+% 		\expandafter \@secondoftwo
+% 	\fi
+% }
+% \catcode`\*=12
 
 
-% redefine \includegraphics
-\let\StandardIncludeGraphics\includegraphics%
-\renewcommand{\includegraphics}[2][]{%
-%	\IfFileExists{./images/#2}{\StandardIncludeGraphics[#1]{#2}}{
-	\imagetest{#2}{\StandardIncludeGraphics[#1]{#2}}{
-		\fbox{ File "\detokenize{#2}" missing }
-	}
-}
+% % redefine \includegraphics
+% \let\StandardIncludeGraphics\includegraphics%
+% \renewcommand{\includegraphics}[2][]{%
+% %	\IfFileExists{./images/#2}{\StandardIncludeGraphics[#1]{#2}}{
+% 	\imagetest{#2}{\StandardIncludeGraphics[#1]{#2}}{
+% 		\fbox{ File "\detokenize{#2}" missing }
+% 	}
+% }
 
-\makeatother % changes the catcode of @ back to 12
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% \makeatother % changes the catcode of @ back to 12
+% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 
 
@@ -139,7 +139,7 @@
 		every mark/.append style={mark size=1.5pt}
 	}
 	\ref{named}\\
-	\foreach \file in {solution, learned_ode}
+	\foreach \file in {learned_solution, learned_ode_solution}
 	{
 		%\foreach \dstep/\nth in {1/20, 2/10, 4/5, 10/2, 20/1}
 		\foreach \dstep/\nth in {2/10, 4/5, 10/2}
@@ -166,15 +166,15 @@
 						legend style={draw=none},
 						very thick ]
 						%\addplot[forget plot] graphics [points={(0,-0.5) (2,1.5)}, includegraphics={trim=0 0 0 0,clip}] {ex_stiff/vector_field.pdf};
-						\addplot[red]  table[col sep=comma] {ode.csv};
-						\ifthenelse{ \equal{\file}{learned_ode} \and \equal{\dstep}{10} }{ \addlegendentry[black]{exact\phantom{asd}} }{}
+						\addplot[red]  table[col sep=comma] {ode_solution.csv};
+						\ifthenelse{ \equal{\file}{learned_ode_solution} \and \equal{\dstep}{10} }{ \addlegendentry[black]{exact\phantom{asd}} }{}
 						%\addplot[forget plot]  table[col sep=comma] {ex_stiff/piecewise_ode.csv};
-						\addplot[forget plot, red, only marks, each nth point = \nth]  table[col sep=comma] {ode_solution.csv};
+						\addplot[forget plot, red, only marks, each nth point = \nth]  table[col sep=comma] {true_solution.csv};
 						%\foreach \th in {0.00, 0.25, 0.50, 0.75, 1.00}
 						\foreach \th in {0.00, 0.50, 1.00}
 						{
-							\addplot  table[col sep=comma] {th\th_T2.0_steps20_data_100_\dstep_eigs-25.00_-15.00/\file.csv};
-							\ifthenelse{ \equal{\file}{learned_ode} \and \equal{\dstep}{10} }{ \addlegendentryexpanded[black]{$\theta=\th$\noexpand\phantom{asd}} }{}
+							\addplot  table[col sep=comma] {datasteps_\dstep_theta_\th_\file.csv};
+							\ifthenelse{ \equal{\file}{learned_ode_solution} \and \equal{\dstep}{10} }{ \addlegendentryexpanded[black]{$\theta=\th$\noexpand\phantom{asd}} }{}
 						}
 				\end{axis}
 			\end{tikzpicture}

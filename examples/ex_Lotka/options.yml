@@ -1,0 +1,21 @@
+seed: 10
+
+theta: 0.5
+tol: 1.e-6
+T: 10
+steps: 50
+
+codim: 0
+width: 20
+depth: 4
+sigma: relu
+
+init: rnd
+epochs: 3000
+lr: 1.e-3
+datasize: 100
+datasteps: 50
+batch: -1
+
+aTV: -1
+mciters: 1
