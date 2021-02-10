@@ -4,6 +4,9 @@
 ## Requirements
 
 ## Installation
+```
+python -m pip install git+https://github.com/vreshniak/ImplicitResNet.git
+```
 
 ## Citation
 ```
