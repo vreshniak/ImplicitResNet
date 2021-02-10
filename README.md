@@ -1,8 +1,19 @@
 # Robust learning with implicit residual networks
-### [arXiv](https://arxiv.org/abs/1905.10479)
+### [paper](https://www.mdpi.com/2504-4990/3/1/3/htm#B27-make-03-00003)
 
 ## Requirements
 
 ## Installation
 
 ## Citation
+```
+@article{make3010003,
+  title={Robust Learning with Implicit Residual Networks},
+  author={Reshniak, Viktor and Webster, Clayton G.},
+  journal={Machine Learning and Knowledge Extraction},
+  volume={3},
+  number={1},
+  pages={34--55},
+  year={2021},
+  url={https://www.mdpi.com/2504-4990/3/1/3}
+}
