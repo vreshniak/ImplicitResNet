@@ -1,8 +1,6 @@
 # Robust learning with implicit residual networks
 ### [paper](https://www.mdpi.com/2504-4990/3/1/3)
 
-## Requirements
-
 ## Installation
 ```
 python -m pip install git+https://github.com/vreshniak/ImplicitResNet.git
