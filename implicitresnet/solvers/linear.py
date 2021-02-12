@@ -95,7 +95,7 @@ def gmres( A, x, b, max_iters=None, min_iters=3, max_restarts=1, tol=None, M=Non
 		return x, r.norm(dim=1).amax(), 1, 0
 
 	if tol is None: tol = 1*torch.finfo(dtype).eps
-	tol = max(tol*b.norm(1).amax(), tol)
+	tol = max(tol*b.norm(dim=1).amax(), tol)
 
 	# set max_iters if not given, and perform sanity checks
 	assert max_restarts>0,  "max_restarts must be greater than 0, max_restarts = "+str(max_restarts)
