@@ -227,7 +227,7 @@ class TrainingLoop:
 					if self.accuracy_fn is not None:
 						message = message + ", acc"%(val)
 						for val in epoch_acc_items.values():
-							message = message + " %4.2f"%(val)
+							message = message + " %6.2f"%(val*100)
 					if self.val_dataloader is not None:
 						message = message + "  ||  %5.2f sec, val_loss"%(val_sec)
 						for val in epoch_val_loss_items.values():
@@ -235,7 +235,7 @@ class TrainingLoop:
 						if self.accuracy_fn is not None:
 							message = message + ", val_acc "%(val)
 							for val in epoch_val_acc_items.values():
-								message = message + "%4.2f "%(val)
+								message = message + "%6.2f "%(val*100)
 					print(message)
 					sec = 0
 
