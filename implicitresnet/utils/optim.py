@@ -33,12 +33,13 @@ def as_sum_and_dict(value):
 
 
 class TrainingLoop:
-	def __init__(self, model, loss_fn, dataset, batch_size, optimizer,
+	def __init__(self, model, loss_fn, dataset, batch_size, optimizer, data_augmentation=None,
 		val_dataset=None, val_batch_size=-1, accuracy_fn=None, regularizer=None, scheduler=None, lr_schedule=None,
 		checkpoint=None, writer=None, write_hist=False, init_epoch=0, val_freq=1, stat_freq=1, pin_memory=False):
 		self.model       = model
 		self.loss_fn     = loss_fn
 		self.optimizer   = optimizer
+		self.data_augm   = data_augmentation
 		self.accuracy_fn = accuracy_fn
 		self.regularizer = regularizer
 		self.scheduler   = scheduler
@@ -110,11 +111,16 @@ class TrainingLoop:
 			epoch_acc_items  = {}
 			start = time.time()
 			for batch_ndx, sample in enumerate(self.dataloader):
-				self.optimizer.zero_grad()
-
 				# model input and target
 				x = [ sample[i].to(device) for i in range(len(sample)-1) ]
 				y = sample[-1].to(device)
+
+				if self.data_augm is not None:
+					aug_x = [ self.data_augm(xi,y)  for xi in x  ]
+					x = [ torch.cat((xi, augi)) for xi, augi in zip(x,aug_x)  ]
+					y = torch.cat((x[0].size(0)//y.size(0))*[y])
+
+				self.optimizer.zero_grad()
 
 				# model prediction
 				y_pred = self.model(*x)
