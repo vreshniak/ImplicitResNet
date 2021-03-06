@@ -129,18 +129,16 @@ class TrainingLoop:
 
 				# propagate gradients
 				if isinstance(self.optimizer,torch.optim.LBFGS):
-					loss_items = []
-					reg_items  = []
-					acc_items  = []
+					loss, loss_items, reg_items, acc_items = [0], [0], [0], [0]
 					def closure():
-						loss, reg, loss_items[0], reg_items[0], acc_items[0] = self.evaluate_loss_regularizers_accuracy(y_pred, y)
-						loss_reg = loss + reg
+						self.optimizer.zero_grad()
+						y_pred = self.model(*x)
+						loss[0], reg, loss_items[0], reg_items[0], acc_items[0] = self.evaluate_loss_regularizers_accuracy(y_pred, y)
+						loss_reg = loss[0] + reg
 						loss_reg.backward()
 						return loss_reg
 					self.optimizer.step(closure)
-					loss_items = loss_items[0]
-					reg_items  = reg_items[0]
-					acc_items  = acc_items[0]
+					loss, loss_items, reg_items, acc_items = loss[0], loss_items[0], reg_items[0], acc_items[0]
 				else:
 					loss, reg, loss_items, reg_items, acc_items = self.evaluate_loss_regularizers_accuracy(y_pred, y)
 					(loss + reg).backward()
