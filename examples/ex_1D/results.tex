@@ -145,7 +145,7 @@
 			\begin{axis} [
 					%scale=\scale,
 					%scale only axis,
-					width=0.35\textwidth,
+					width=0.34\textwidth,
 					each nth point=1,
 					ymode = \ymode,
 					cycle multi list = { divlist\nextlist thetalist },
@@ -154,7 +154,7 @@
 					title style={font=\small},
 					%y dir=reverse,
 					very thick ]
-				\foreach \adiv in {0.00, 0.25, 0.50, 0.75, 1.00}
+				\foreach \adiv in {0.00, 0.50, 1.00, 2.00, 3.00}
 					\foreach \th in {0.00, 0.25, 0.50, 0.75, 1.00}
 						\addplot  table[x=Step,y=Value,col sep=comma, y expr=\thisrowno{1}] {theta\th_T5_data20_adiv\adiv_\qi.csv};
 			\end{axis}
@@ -186,9 +186,9 @@
 		\begin{axis} [
 				cycle list name = divlist,
 				xlabel = $\theta$,
-				legend entries = {$\alpha_{div}=0.00$,$\alpha_{div}=0.25$,$\alpha_{div}=0.50$,$\alpha_{div}=0.75$,$\alpha_{div}=1.00$}
+				legend entries = {$\alpha_{div}=0.00$,$\alpha_{div}=0.50$,$\alpha_{div}=1.00$,$\alpha_{div}=2.00$,$\alpha_{div}=3.00$}
 			]
-			\foreach \adiv in {0.00, 0.25, 0.50, 0.75, 1.00}
+			\foreach \adiv in {0.00, 0.50, 1.00, 2.00, 3.00}
 				\addplot+ [mark=o, mark options={solid}]table[x=Step,y=Value,col sep=comma] {iters_vs_theta_adiv\adiv.csv};
 		\end{axis}
 	\end{tikzpicture}
@@ -213,7 +213,7 @@
 \begin{figure}
 	\centering
 	\pgfplotsset{ticks=none}
-	\foreach \adiv in {0.00, 0.50, 1.00}
+	\foreach \adiv in {0.00, 2.00, 3.00}
 	{
 		\foreach \th in {0.00, 0.50, 1.00}
 		{

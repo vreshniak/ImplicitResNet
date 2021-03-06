@@ -57,7 +57,7 @@ for run in os.listdir(logdir):
 			np.savetxt(savedir+dataname+key+".csv", data[val][ind,:], delimiter=',', header='Step, Value', comments='')
 
 
-for adiv in [0.0,0.25,0.5,0.75,1.0]:
+for adiv in [0.00,0.50,1.00,2.00,3.00]:
 	iters_vs_theta = []
 	for theta in [0.0,0.25,0.5,0.75,1.0]:
 		dataname = ("theta%.2f_T%d_data%d_adiv%.2f"%( theta, args['T'], args['datasize'], adiv ))
@@ -67,7 +67,7 @@ for adiv in [0.0,0.25,0.5,0.75,1.0]:
 
 for theta in [0.0,0.25,0.5,0.75,1.0]:
 	iters_vs_adiv = []
-	for adiv in [0.0,0.25,0.5,0.75,1.0]:
+	for adiv in [0.00,0.50,1.00,2.00,3.00]:
 		dataname = ("theta%.2f_T%d_data%d_adiv%.2f"%( theta, args['T'], args['datasize'], adiv ))
 		data = np.loadtxt(savedir+dataname+"_iters.csv", delimiter=',', skiprows=1)
 		iters_vs_adiv = iters_vs_adiv + [adiv, data[-1,1]]
