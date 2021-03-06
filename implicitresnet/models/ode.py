@@ -400,7 +400,7 @@ def compute_regularizers_and_statistics(solver, input, output):
 
 		# divergence
 		if alpha['div']!=0:
-			reg[name+'div'] = alpha['div'] * trapz([ct*divt[0] for ct, divt in zip(c, divjac)], dx)
+			reg[name+'div'] = alpha['div'] * torch.sigmoid( trapz([ct*divt[0] for ct, divt in zip(c, divjac)], dx) )
 
 		# jacobian
 		if alpha['jac']!=0:
