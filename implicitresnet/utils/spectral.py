@@ -308,7 +308,8 @@ def spectral_norm(module: T_module,
             dim = 1
         else:
             dim = 0
-    SpectralNorm.apply(module, name, input_shape, n_power_iterations, dim, eps)
+    if n_power_iterations>0:
+        SpectralNorm.apply(module, name, input_shape, n_power_iterations, dim, eps)
     return module
 
 
