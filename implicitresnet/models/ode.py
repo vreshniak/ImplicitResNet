@@ -16,7 +16,7 @@ from ..utils import calc
 _nsolver    = 'lbfgs'
 _lin_solver = 'gmres' #scipy_lgmres
 
-_TOL = 1.e-6
+_TOL = 1.e-8
 _max_iters = 200
 _max_lin_iters = 10
 
@@ -281,7 +281,7 @@ class theta_solver(ode_solver):
 	@property
 	def statistics(self, reset=True):
 		stat = super().statistics
-		stat['hparams/theta'] = self.theta
+		stat['hparams/%s_theta'%(self.name)] = self.theta
 		return stat
 
 	########################################
