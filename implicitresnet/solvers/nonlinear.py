@@ -38,7 +38,7 @@ def lbfgs( fun, x0, tol=None, max_iters=_max_iters, min_iters=_min_iters, histor
 	# initial condition: make new (that's why clone) leaf (that's why detach) node which requires gradient
 	x = x0.clone().detach().requires_grad_(True)
 
-	nsolver = torch.optim.LBFGS([x], lr=1, max_iter=max_iters, max_eval=None, tolerance_grad=1.e-9, tolerance_change=1.e-9, history_size=history_size, line_search_fn='strong_wolfe')
+	nsolver = torch.optim.LBFGS([x], lr=1, max_iter=max_iters, max_eval=None, tolerance_grad=1.e-12, tolerance_change=1.e-12, history_size=history_size, line_search_fn='strong_wolfe')
 	def closure():
 		resid = fun(x)
 		error[0] = batch_err(resid)
