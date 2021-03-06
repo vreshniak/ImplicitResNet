@@ -48,8 +48,10 @@ class rhs_base(torch.nn.Module, metaclass=ABCMeta):
 		elif len(spectral_limits)==2:
 			self.eigmin, self.eigmax = spectral_limits
 			self.eiginit = 0.5*(self.eigmin+self.eigmax)
+			assert self.eigmin<self.eigmax, "eigmin < eigmax must be given, got spectral_limits = "+str(spectral_limits)
 		elif len(spectral_limits)==3:
 			self.eigmin, self.eiginit, self.eigmax = spectral_limits
+			assert self.eigmin<self.eiginit and self.eiginit<self.eigmax, "eigmin < eiginit < eigmax must be given, got spectral_limits = "+str(spectral_limits)
 
 		if self.learn_shift:
 			ini_sigmoid_a = 0.1
