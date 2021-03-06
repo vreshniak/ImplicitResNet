@@ -143,11 +143,11 @@ class rhs_parabolic_mlp(rhs_base):
 
 
 class rhs_conv2d(rhs_base):
-	def __init__(self, input_shape, kernel_size, depth, T, num_steps, activation='relu', power_iters=0, spectral_limits=None, learn_scales=False, learn_shift=False):
+	def __init__(self, input_shape, kernel_size, depth, T, num_steps, activation='relu', power_iters=0, spectral_limits=None, learn_scales=False, learn_shift=False, bias=True):
 		super().__init__(input_shape, T, num_steps, spectral_limits, learn_scales, learn_shift)
 
 		# define rhs
-		self.F = torch.nn.ModuleList( [ PreActConv2d(input_shape, depth=depth, kernel_size=kernel_size, activation=activation, power_iters=power_iters) for _ in range(num_steps) ] )
+		self.F = torch.nn.ModuleList( [ PreActConv2d(input_shape, depth=depth, kernel_size=kernel_size, activation=activation, power_iters=power_iters, bias=bias) for _ in range(num_steps) ] )
 
 		# intialize rhs
 		self.initialize()
