@@ -229,7 +229,7 @@ class LinearHyperbolic(Linear):
 ###############################################################################################
 
 class PreActConv2d(Module):
-	def __init__(self, im_shape, depth, kernel_size, activation='relu', power_iters=0):
+	def __init__(self, im_shape, depth, kernel_size, activation='relu', power_iters=0, bias=True):
 		super().__init__()
 
 		channels = im_shape[0]
@@ -238,7 +238,7 @@ class PreActConv2d(Module):
 		sigma = choose_activation(activation)
 
 		# conv layers
-		conv_hid = [ Conv2d(channels, channels, kernel_size, padding=kernel_size//2, bias=True) for _ in range(depth) ]
+		conv_hid = [ Conv2d(channels, channels, kernel_size, padding=kernel_size//2, bias=bias) for _ in range(depth) ]
 
 		# spectral normalization
 		if power_iters>0:
