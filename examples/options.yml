@@ -42,4 +42,6 @@ adiv: float
 ajac: float
 af: float
 aresid: float
+adaugm: float
+aperturb: float
 mciters: int
