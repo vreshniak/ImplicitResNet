@@ -136,7 +136,8 @@ if __name__ == '__main__':
 
 	if args.mode=="train":
 		optimizer   = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.alpha['wdecay'])
-		scheduler   = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.7, patience=10, verbose=True, threshold=1.e-4, threshold_mode='rel', cooldown=10, min_lr=1.e-6, eps=1.e-8)
+		# scheduler   = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.7, patience=10, verbose=True, threshold=1.e-4, threshold_mode='rel', cooldown=10, min_lr=1.e-6, eps=1.e-8)
+		scheduler   = utils.optim.EvenReductionLR(optimizer, lr_reduction=0.2, gamma=0.8, epochs=args.epochs, last_epoch=-1)
 		train_model = utils.TrainingLoop(model, loss_fn, dataset, args.batch, optimizer, val_dataset=val_dataset, scheduler=scheduler, val_freq=1, stat_freq=1)
 
 		writer = SummaryWriter(Path("logs",file_name))
@@ -155,6 +156,13 @@ if __name__ == '__main__':
 	elif args.mode=="test":
 		import matplotlib.pyplot as plt
 		from implicitresnet.utils.spectral import eigenvalues, spectralnorm
+
+		def savefig(*aargs, **kwargs):
+			plt.gca().axis('off')
+			plt.xlim(0, args.T)
+			plt.ylim(-0.5, 1.5)
+			plt.savefig(*aargs, **kwargs)
+
 		#########################################################################################
 		fig_no = 0
 
@@ -164,6 +172,21 @@ if __name__ == '__main__':
 
 		model.eval()
 		rhs_obj = model.rhs
+
+
+		#########################################################################################
+		# evaluate vector fields
+		X = np.linspace(0, args.T, 2*args.steps).reshape(-1,1)
+		Y = np.linspace(-0.5, 1.5, 15).reshape(-1,1)
+		UV_ode = []
+		UV     = []
+		for i in range(len(X)):
+			UV_ode.append(correct_rhs(X[i,0], Y).reshape((-1,1)))
+			UV.append(rhs_obj(X[i,0], torch.from_numpy(Y).float()).detach().numpy().reshape((-1,1)))
+		UV_ode = np.hstack(UV_ode)
+		UV     = np.hstack(UV)
+		X,Y = np.meshgrid(X,Y)
+		XY  = np.hstack((X.reshape(-1,1), Y.reshape(-1,1)))
 
 
 		#########################################################################################
@@ -227,55 +250,47 @@ if __name__ == '__main__':
 		###############################################
 		# plot vector field
 
-		# evaluate vector fields
-		X = np.linspace(0, args.T, 2*args.steps).reshape(-1,1)
-		Y = np.linspace(-0.5, 1.5, 15).reshape(-1,1)
-		UV_ode = []
-		UV     = []
-		for i in range(len(X)):
-			UV_ode.append(correct_rhs(X[i,0], Y).reshape((-1,1)))
-			UV.append(rhs_obj(X[i,0], torch.from_numpy(Y).float()).detach().numpy().reshape((-1,1)))
-		UV_ode = np.hstack(UV_ode)
-		UV     = np.hstack(UV)
-		X,Y = np.meshgrid(X,Y)
-		XY  = np.hstack((X.reshape(-1,1), Y.reshape(-1,1)))
 
-		# exact vector field
+		# plot learned trajectories
+		fig = plt.figure(fig_no); fig_no += 1
+		plt.quiver(X, Y, np.ones_like(X), UV.reshape(X.shape), angles='xy')
+		plt.plot(t_ode[0],np.cos(t_ode[0]),'-r', linewidth=2)
+		for t, y in zip(t_learned,y_learned):
+			plt.plot(t,y,'-b', linewidth=1)
+		savefig(images_output+'_learned_trajectories.pdf', bbox_inches='tight', pad_inches=0.0)
+
+		# plot learned continuous trajectories
+		fig = plt.figure(fig_no); fig_no += 1
+		plt.quiver(X, Y, np.ones_like(X), UV.reshape(X.shape), angles='xy')
+		plt.plot(t_ode[0],np.cos(t_ode[0]),'-r', linewidth=2)
+		for t, y in zip(t_learned_ode,y_learned_ode):
+			plt.plot(t,y,'-b', linewidth=1)
+		savefig(images_output+'_learned_ode_trajectories.pdf', bbox_inches='tight', pad_inches=0.0)
+
+
+		# plot exact vector field
 		fig = plt.figure(fig_no); fig_no += 1
 		plt.quiver(X, Y, np.ones_like(X), UV_ode.reshape(X.shape), angles='xy')
-		plt.xlim(0, args.T)
-		plt.ylim(-0.5, 1.5)
-		plt.gca().axes.xaxis.set_visible(False)
-		plt.gca().axes.yaxis.set_visible(False)
-		plt.gca().axis('off')
-		plt.savefig(Path(paths['output_images'],'ode_vector_field.pdf'), bbox_inches='tight', pad_inches=0.0)
+		savefig(Path(paths['output_images'],'ode_vector_field.pdf'), bbox_inches='tight', pad_inches=0.0)
+
+		# plot learned vector field
+		fig = plt.figure(fig_no); fig_no += 1
+		plt.quiver(X, Y, np.ones_like(X), UV.reshape(X.shape), angles='xy')
+		savefig(Path(images_output+'_vector_field.pdf'), bbox_inches='tight', pad_inches=0.0)
+
 
 		# plot training data
+		fig = plt.figure(fig_no); fig_no += 1
 		steps=1000
 		t0_train = t0_train.detach().numpy().flatten()
 		y0_train = y0_train.detach().numpy().flatten()
 		_, _, t_init, y_init = get_data(steps=steps, t0=t0_train, y0=y0_train)
 		t_init = t_init.detach().numpy().reshape((len(t0_train),steps+1))
 		y_init = y_init.detach().numpy().reshape((len(t0_train),steps+1))
+		plt.quiver(X, Y, np.ones_like(X), UV_ode.reshape(X.shape), angles='xy')
 		for i in range(len(t_init)):
 			plt.plot(t_init[i],  y_init[i],  '-b', linewidth=1.5)
 			# plt.plot(t_train[i], y_train[i], 'ok', markersize=5.0)
 		plt.plot(t0_train, y0_train, 'or', markersize=5.0)
 		# plt.plot(tt, yy, 'or')
-		plt.xlim(0, args.T)
-		plt.ylim(-0.5, 1.5)
-		plt.gca().axes.xaxis.set_visible(False)
-		plt.gca().axes.yaxis.set_visible(False)
-		plt.gca().axis('off')
-		plt.savefig(Path(paths['output_images'],'training_data.pdf'), bbox_inches='tight', pad_inches=0.0)
-
-
-		# learned vector field
-		fig = plt.figure(fig_no); fig_no += 1
-		plt.quiver(X, Y, np.ones_like(X), UV.reshape(X.shape), angles='xy')
-		plt.xlim(0, args.T)
-		plt.ylim(-0.5, 1.5)
-		plt.gca().axes.xaxis.set_visible(False)
-		plt.gca().axes.yaxis.set_visible(False)
-		plt.gca().axis('off')
-		plt.savefig(Path(images_output+'_vector_field.pdf'), bbox_inches='tight', pad_inches=0.0)
+		savefig(Path(paths['output_images'],'training_data.pdf'), bbox_inches='tight', pad_inches=0.0)
