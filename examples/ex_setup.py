@@ -75,7 +75,9 @@ def parse_args():
 	args.alpha['resid'] = args.aresid if args.aresid is not None else 0.0
 	args.alpha['TV']    = args.aTV    if args.aTV    is not None else 0.0
 	args.alpha['wdecay']= args.wdecay if args.wdecay is not None else 0.0
-	del args.adiv, args.ajac, args.af, args.aresid, args.aTV, args.wdecay
+	args.alpha['daugm'] = args.adaugm if args.adaugm is not None else 0.0
+	args.alpha['perturb'] = args.aperturb if args.aperturb is not None else 0.0
+	del args.adiv, args.ajac, args.af, args.aresid, args.aTV, args.wdecay, args.adaugm, args.aperturb
 
 	return args
 
@@ -280,3 +282,20 @@ def savefig(name, format='pdf', aspect=None):
 	if aspect is not None:
 		plt.gca().set_aspect('equal')
 	plt.savefig(name+'.%s'%(format), pad_inches=0.0, bbox_inches='tight')
+
+
+
+def topk_acc(input, target, topk=(1,)):
+	"""Computes the precision@k for the specified values of k"""
+	maxk = max(topk)
+	batch_size = target.size(0)
+
+	_, pred = input.topk(k=maxk, dim=1, largest=True, sorted=True)
+	pred = pred.t()
+	correct = pred.eq(target.view(1, -1).expand_as(pred))
+
+	res = []
+	for k in topk:
+		correct_k = correct[:k].flatten().float().sum(0)
+		res.append(float("{:.1f}".format(correct_k.mul_(100.0 / batch_size).detach().numpy())))
+	return res
