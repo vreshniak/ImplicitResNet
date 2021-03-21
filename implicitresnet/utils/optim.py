@@ -166,7 +166,7 @@ class TrainingLoop:
 				# lerning rate schedule
 				if self.scheduler is not None and self.lr_schedule is None:
 					if type(self.scheduler)==torch.optim.lr_scheduler.ReduceLROnPlateau:
-						self.scheduler.step(loss)
+						self.scheduler.step(epoch_loss)
 					else:
 						self.scheduler.step()
 				if self.lr_schedule is not None:
