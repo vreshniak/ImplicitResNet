@@ -33,13 +33,14 @@ def as_sum_and_dict(value):
 
 
 class TrainingLoop:
-	def __init__(self, model, loss_fn, dataset, batch_size, optimizer, data_augmentation=None,
+	def __init__(self, model, loss_fn, dataset, batch_size, optimizer, data_augmentation=None, tol=1.e-12,
 		val_dataset=None, val_batch_size=-1, accuracy_fn=None, regularizer=None, scheduler=None, lr_schedule=None,
 		checkpoint=None, writer=None, write_hist=False, init_epoch=0, val_freq=1, stat_freq=1, pin_memory=False):
 		self.model       = model
 		self.loss_fn     = loss_fn
 		self.optimizer   = optimizer
 		self.data_augm   = data_augmentation
+		self.tol         = tol
 		self.accuracy_fn = accuracy_fn
 		self.regularizer = regularizer
 		self.scheduler   = scheduler
@@ -100,7 +101,9 @@ class TrainingLoop:
 		device = self.model.parameters().__next__().device
 
 		sec = 0
+		epoch_loss = 1.0
 		for epoch in range(1,epochs+1):
+			if epoch_loss<=self.tol: break
 			self.curr_epoch += 1
 
 			self.model.train()
@@ -145,10 +148,12 @@ class TrainingLoop:
 					self.optimizer.step()
 
 				# collect loss, regularizer and accuracy components
+				epoch_loss = epoch_loss + loss.detach()
 				for key, val in loss_items.items(): epoch_loss_items[key] = epoch_loss_items.get(key,0) + val
 				for key, val in reg_items.items():  epoch_reg_items[key]  = epoch_reg_items.get(key,0)  + val
 				for key, val in acc_items.items():  epoch_acc_items[key]  = epoch_acc_items.get(key,0)  + val
 
+			epoch_loss = epoch_loss / (batch_ndx+1)
 			for key in epoch_loss_items.keys(): epoch_loss_items[key] = epoch_loss_items[key] / (batch_ndx+1)
 			for key in epoch_reg_items.keys():  epoch_reg_items[key]  = epoch_reg_items[key]  / (batch_ndx+1)
 			for key in epoch_acc_items.keys():  epoch_acc_items[key]  = epoch_acc_items[key]  / (batch_ndx+1)
