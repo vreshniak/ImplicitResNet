@@ -127,7 +127,7 @@ class TrainingLoop:
 
 				# model prediction
 				y_pred = self.model(*x)
-				if y.shape!=y_pred.shape and epoch==1:
+				if y.shape!=y_pred.shape and epoch==1 and batch_ndx==0:
 					print("Warning: target shape "+str(y.shape)+" not equal to model output shape "+str(y_pred.shape))
 
 				# propagate gradients
