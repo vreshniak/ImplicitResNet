@@ -109,6 +109,7 @@ class TrainingLoop:
 			self.model.train()
 
 			# train on training dataset
+			epoch_loss = 0
 			epoch_loss_items = {}
 			epoch_reg_items  = {}
 			epoch_acc_items  = {}
