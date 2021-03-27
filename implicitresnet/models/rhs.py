@@ -55,6 +55,14 @@ class rhs_base(torch.nn.Module, metaclass=ABCMeta):
 			b = math.log(ini_sigmoid_b/(1-ini_sigmoid_b))
 			torch.nn.init.constant_(self.shiftb, b)
 
+	def freeze_shift(self):
+		self.shifta.requires_grad_(False)
+		self.shiftb.requires_grad_(False)
+
+	def unfreeze_shift(self):
+		self.shifta.requires_grad_(True)
+		self.shiftb.requires_grad_(True)
+
 
 	def initialize(self):
 		for name, weight in self.F.named_parameters():
