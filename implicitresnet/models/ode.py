@@ -430,8 +430,11 @@ def compute_regularizers_and_statistics(solver, input, output):
 		# note that solver.training has not been changed by rhs.eval()
 		rhs.train(mode=solver.training)
 
-		setattr(solver, 'regularizer', reg)
-		if _collect_stat:
+		if not hasattr(solver, 'regularizer'):
+			setattr(solver, 'regularizer', reg)
+		else:
+			for key, val in reg.items():
+				solver.regularizer[key] = val
 		if _collect_rhs_stat:
 			stat['rhs/'+name+'jac'] = stat['rhs/'+name+'jac'].sqrt()
 			stat['rhs/'+name+'f']   = stat['rhs/'+name+'f'].sqrt()
