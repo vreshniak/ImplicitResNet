@@ -44,12 +44,15 @@ class rhs_base(torch.nn.Module, metaclass=ABCMeta):
 			self.eigmin, self.eiginit, self.eigmax = spectral_limits
 			assert self.eigmin<self.eiginit and self.eiginit<self.eigmax, "eigmin < eiginit < eigmax must be given, got spectral_limits = "+str(spectral_limits)
 
-		if self.learn_shift:
-			ini_sigmoid_a = 0.1
-			ini_sigmoid_b = ini_sigmoid_a * (self.eigmax-self.eiginit)/(self.eiginit-self.eigmin) # balance initial shifta and shiftb
-			b = math.log(ini_sigmoid_a/(1-ini_sigmoid_a))
-			a = math.log(ini_sigmoid_b/(1-ini_sigmoid_b))
+		ini_sigmoid_a = 0.01
+		ini_sigmoid_b = ini_sigmoid_a * (self.eigmax-self.eiginit)/(self.eiginit-self.eigmin) # balance initial shifta and shiftb
+		# ini_sigmoid_b = 0.99
+		# ini_sigmoid_a = ini_sigmoid_b * (self.eiginit-self.eigmin)/(self.eigmax-self.eiginit) # balance initial shifta and shiftb
+		if self.shifta.requires_grad:
+			a = math.log(ini_sigmoid_a/(1-ini_sigmoid_a))
 			torch.nn.init.constant_(self.shifta, a)
+		if self.shiftb.requires_grad:
+			b = math.log(ini_sigmoid_b/(1-ini_sigmoid_b))
 			torch.nn.init.constant_(self.shiftb, b)
 
 
