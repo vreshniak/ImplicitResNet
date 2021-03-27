@@ -21,6 +21,7 @@ _max_iters = 200
 _max_lin_iters = 20
 
 _collect_stat = True
+_collect_rhs_stat = False
 _debug = False
 
 
