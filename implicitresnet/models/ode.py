@@ -18,7 +18,7 @@ _lin_solver = 'gmres' #scipy_lgmres
 
 _TOL = 1.e-8
 _max_iters = 200
-_max_lin_iters = 10
+_max_lin_iters = 20
 
 _collect_stat = True
 _debug = False
