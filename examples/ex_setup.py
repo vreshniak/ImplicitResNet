@@ -160,28 +160,20 @@ def create_paths(args):
 	# subdir = "mlp" if args.prefix is None else args.prefix
 	# if args.mode=="init": subdir += "/init"
 
-	Path("checkpoints","init").mkdir(parents=True, exist_ok=True)
-	Path("checkpoints","epoch_0").mkdir(parents=True, exist_ok=True)
-	Path("checkpoints","epoch_last").mkdir(parents=True, exist_ok=True)
+	Path("checkpoints","initial").mkdir(parents=True, exist_ok=True)
+	Path("checkpoints","final").mkdir(parents=True, exist_ok=True)
 	Path("output","images").mkdir(parents=True, exist_ok=True)
 	Path("output","data").mkdir(parents=True, exist_ok=True)
 
 	paths = {
-		'initialization': Path('checkpoints','init'),
-		'checkpoints_0':  Path('checkpoints','epoch_0'),
-		'checkpoints':    Path('checkpoints','epoch_last'),
-		'output':         Path('output'),
-		'output_images':  Path("output","images"),
-		'output_data':    Path("output","data")
+		'checkpoints': Path('checkpoints'),
+		'chkp_init':   Path('checkpoints','initial'),
+		'chkp_final':  Path('checkpoints','final'),
+		'output':      Path('output'),
+		'out_images':  Path("output","images"),
+		'out_data':    Path("output","data")
 	}
-
 	return paths
-	# checkpoint_dir_0 = Path("checkpoints",subdir,'epoch0',file_name)
-	# checkpoint_dir   = Path("checkpoints",subdir,file_name)
-	# checkpoint_dir_0 = Path("checkpoints",'epoch0')
-	# checkpoint_dir   = Path("checkpoints")
-	# out_dir = Path("out")
-	# return checkpoint_dir_0, checkpoint_dir, out_dir
 
 
 def load_model(model, args, device=_cpu, location=None):
