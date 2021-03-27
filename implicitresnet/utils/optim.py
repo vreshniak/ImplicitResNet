@@ -1,6 +1,8 @@
 import time
 import math
 
+from pathlib import Path
+
 import torch
 from torch.utils.tensorboard import SummaryWriter
 
@@ -35,7 +37,7 @@ def as_sum_and_dict(value):
 class TrainingLoop:
 	def __init__(self, model, loss_fn, dataset, batch_size, optimizer, data_augmentation=None, tol=1.e-12,
 		val_dataset=None, val_batch_size=-1, accuracy_fn=None, regularizer=None, scheduler=None, lr_schedule=None,
-		checkpoint=None, writer=None, write_hist=False, init_epoch=0, val_freq=1, stat_freq=1, pin_memory=False):
+		checkpoints=None, writer=None, write_hist=False, init_epoch=0, val_freq=1, stat_freq=1, pin_memory=False):
 		self.model       = model
 		self.loss_fn     = loss_fn
 		self.optimizer   = optimizer
@@ -45,16 +47,26 @@ class TrainingLoop:
 		self.regularizer = regularizer
 		self.scheduler   = scheduler
 		self.lr_schedule = lr_schedule
-		self.checkpoint  = checkpoint
+		self.checkpoints = checkpoints
 		self.writer      = writer
 		self.write_hist  = write_hist
 		self.curr_epoch  = init_epoch
 		self.val_freq    = val_freq
 		self.stat_freq   = stat_freq
 
-		if checkpoint is not None:
-			assert isinstance(checkpoint, dict), "checkpoint must be dictionary"
-			assert ('each_nth' in checkpoint.keys()) and ('dir' in checkpoint.keys()), "checkpoint must have 'each_nth' and 'dir' keys"
+		if checkpoints is not None:
+			assert isinstance(checkpoints, dict), "checkpoints must be dictionary"
+			assert ('dir' in checkpoints.keys()), "checkpoints must have 'dir' keys"
+			if not 'name' in checkpoints.keys(): checkpoints['name'] = 'chkp'
+			Path(checkpoints['dir'],"best_loss").mkdir(parents=True, exist_ok=True)
+			Path(checkpoints['dir'],"best_val_loss").mkdir(parents=True, exist_ok=True)
+			Path(checkpoints['dir'],"best_accuracy").mkdir(parents=True, exist_ok=True)
+			Path(checkpoints['dir'],"best_val_accuracy").mkdir(parents=True, exist_ok=True)
+
+			self.best_loss = 1.e6
+			self.best_val_loss = 1.e6
+			self.best_accuracy = 0.0
+			self.best_val_accuracy = 0.0
 
 		# prepare data
 		batch_shuffle = True
@@ -161,12 +173,6 @@ class TrainingLoop:
 			sec += (time.time() - start)
 
 
-			if self.checkpoint is not None:
-				if self.curr_epoch%self.checkpoint['each_nth']==0:
-					torch.save(self.model.state_dict(), Path(self.checkpoint['dir'],"_chp_%d"%(self.curr_epoch)))
-					print("checkpoint at epoch %d"%(self.curr_epoch))
-
-
 			with torch.no_grad():
 				###########################################################
 				# lerning rate schedule
@@ -257,6 +263,34 @@ class TrainingLoop:
 								writer.add_histogram('gradients/'+name,     weight.grad, self.curr_epoch, bins='tensorflow')
 								# writer.add_scalar('mean_param_value/'+name, weight.abs().mean(),      self.curr_epoch)
 								# writer.add_scalar('mean_param_grad/'+name,  weight.grad.abs().mean(), self.curr_epoch)
+
+
+			if self.checkpoints is not None:
+				if 'each_nth' in self.checkpoints.keys() and self.curr_epoch%self.checkpoints['each_nth']==0:
+					Path(self.checkpoints['dir'],"epoch_%d"%(self.curr_epoch)).mkdir(parents=True, exist_ok=True)
+					torch.save(self.model.state_dict(), Path(self.checkpoints['dir'],"epoch_%d"%(self.curr_epoch),self.checkpoints['name']))
+					print("checkpoint at epoch %d"%(self.curr_epoch))
+				for value in epoch_loss_items.values():
+					if value<=self.best_loss:
+						self.best_loss = value
+						torch.save(self.model.state_dict(), Path(self.checkpoints['dir'],"best_loss",self.checkpoints['name']))
+						print("checkpoint best loss")
+				for value in epoch_val_loss_items.values():
+					if value<=self.best_val_loss:
+						self.best_val_loss = value
+						torch.save(self.model.state_dict(), Path(self.checkpoints['dir'],"best_val_loss",self.checkpoints['name']))
+						print("checkpoint best validation loss")
+				if self.accuracy_fn is not None:
+					# for value in epoch_acc_items.values():
+					# 	if value>=self.best_accuracy:
+					# 		self.best_accuracy = value
+					# 		torch.save(self.model.state_dict(), Path(self.checkpoints['dir'],"best_accuracy",self.checkpoints['name']))
+					# 		print("checkpoint best accuracy")
+					for value in epoch_val_acc_items.values():
+						if value>=self.best_val_accuracy:
+							self.best_val_accuracy = value
+							torch.save(self.model.state_dict(), Path(self.checkpoints['dir'],"best_val_accuracy",self.checkpoints['name']))
+							print("checkpoint best validation accuracy")
 
 
 
