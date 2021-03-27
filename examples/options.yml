@@ -1,5 +1,6 @@
 ####################
 prefix: str
+model: str
 name: str
 mode: str
 seed: int
