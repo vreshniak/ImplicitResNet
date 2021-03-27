@@ -18,6 +18,8 @@ def choose_activation(activation):
 	if isinstance(activation,str):
 		if activation=='relu':
 			return torch.nn.ReLU()
+		elif activation=='elu':
+			return torch.nn.ELU()
 		elif activation=='gelu':
 			return torch.nn.GELU()
 		elif activation=='celu':
