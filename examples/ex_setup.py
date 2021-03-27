@@ -251,9 +251,17 @@ def plot_stab(theta, xlim=(-5,5), ylim=(-5,5), fname=None):
 
 	if theta==0.0:
 		levels = [0.5, 1, 2, 3, 4, 5, 6, 7]
-	elif theta==0.25:
+	elif abs(theta-0.10)<=1.e-5:
+		levels = [0.5, 1.0, 2, 3, 4, 5, 6, 7]
+	elif abs(theta-0.20)<=1.e-5:
+		levels = [0.4, 0.75, 1.0, 1.5, 2, 3, 4, 5, 7, 10, 20]
+	elif abs(theta-0.25)<=1.e-5:
 		levels = [0.5, 0.8, 1.0, 1.5, 2, 3, 4, 5, 7, 10, 20]
-	elif theta==0.50:
+	elif abs(theta-0.30)<=1.e-5:
+		levels = [0.5, 0.8, 1.0, 1.5, 2, 3, 4, 5, 7, 10, 20]
+	elif abs(theta-0.40)<=1.e-5:
+		levels = [0.3, 0.5, 0.8, 1.0, 1.5, 2, 3, 5, 10]
+	elif abs(theta-0.50)<=1.e-5:
 		levels = [0.14, 0.33, 0.5, 0.71, 0.83, 1.0, 1.2, 1.4, 2, 3, 7]
 	elif theta==0.75:
 		levels = [0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.7, 1.0, 1.3, 2, 5]
