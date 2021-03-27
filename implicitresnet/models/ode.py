@@ -432,6 +432,7 @@ def compute_regularizers_and_statistics(solver, input, output):
 
 		setattr(solver, 'regularizer', reg)
 		if _collect_stat:
+		if _collect_rhs_stat:
 			stat['rhs/'+name+'jac'] = stat['rhs/'+name+'jac'].sqrt()
 			stat['rhs/'+name+'f']   = stat['rhs/'+name+'f'].sqrt()
 			setattr(rhs, 'statistics', stat)
