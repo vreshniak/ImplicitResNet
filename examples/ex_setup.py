@@ -5,6 +5,7 @@ import yaml
 from random import randint
 
 from pathlib import Path
+import pickle
 
 
 import torch
@@ -79,6 +80,28 @@ def parse_args():
 	args.alpha['perturb'] = args.aperturb if args.aperturb is not None else 0.0
 	del args.adiv, args.ajac, args.af, args.aresid, args.aTV, args.wdecay, args.adaugm, args.aperturb
 
+
+	# save args of each run
+	create_paths(args)
+	if args.mode == 'train':
+		file_name = make_name(args, verbose=False)
+		# write options to file
+		if os.path.exists(Path('output','name2args')):
+			with open(Path('output','name2args'),'rb') as f:
+				name2args = pickle.load(f)
+			name2args[file_name] = args
+		else:
+			name2args = {file_name:args}
+		if os.path.exists(Path('output','runs2args')):
+			with open(Path('output','runs2args'),'rb') as f:
+				runs2args = pickle.load(f)
+			runs2args.append(args)
+		else:
+			runs2args = [args]
+		with open(Path('output','name2args'),'wb') as f:
+			pickle.dump(name2args, f)
+		with open(Path('output','runs2args'),'wb') as f:
+			pickle.dump(runs2args, f)
 	return args
 
 
