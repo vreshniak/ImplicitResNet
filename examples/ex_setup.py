@@ -185,19 +185,19 @@ def load_model(model, args, device=_cpu, location=None):
 		paths     = create_paths(args)
 		file_name = make_name(args, verbose=False)
 
-		if args.mode=='init':
-			return mod
+		# if args.mode=='init':
+		# 	return mod
 		if args.mode=='train':
 			if args.init=='rnd':
 				return mod
-			elif args.init=="init":
-				load_dir = Path(paths['initialization'],'%4.2f'%(args.theta))
+			# elif args.init=="init":
+			# 	load_dir = Path(paths['initialization'],'%4.2f'%(args.theta))
 				# import re
 				# load_dir = Path( checkpoint_dir, re.sub('theta_\d*.\d*','theta_'+str(args.theta),file_name) )
-			elif args.init=="cont":
-				load_dir = Path(paths['checkpoints'], file_name)
+			# elif args.init=="cont":
+			# 	load_dir = Path(paths['chkp_final'], file_name)
 		if args.mode=='plot' or args.mode=='test':
-			load_dir = Path(paths['checkpoints'], file_name)
+			load_dir = Path(paths['chkp_final'], file_name)
 
 		# if args.init=='rnd' and args.mode!='plot' and args.mode!='test':
 		# 	return mod
