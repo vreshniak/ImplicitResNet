@@ -143,13 +143,13 @@ if __name__ == '__main__':
 		writer = SummaryWriter(Path("logs",file_name))
 
 		# save initial model and train
-		torch.save( model.state_dict(), Path(paths['checkpoints_0'],file_name) )
+		torch.save( model.state_dict(), Path(paths['chkp_init'],file_name) )
 		try:
 			train_model(args.epochs, writer=writer)
 		except:
 			raise
 		finally:
-			torch.save( model.state_dict(), Path(paths['checkpoints'],file_name) )
+			torch.save( model.state_dict(), Path(paths['chkp_final'],file_name) )
 
 		writer.close()
 
@@ -167,8 +167,8 @@ if __name__ == '__main__':
 		fig_no = 0
 
 
-		images_output = "%s/%s"%(Path(paths['output_images']), args.name)
-		data_output   = "%s/%s"%(Path(paths['output_data']),   args.name)
+		images_output = "%s/%s"%(Path(paths['out_images']), args.name)
+		data_output   = "%s/%s"%(Path(paths['out_data']),   args.name)
 
 		model.eval()
 		rhs_obj = model.rhs
@@ -222,8 +222,8 @@ if __name__ == '__main__':
 
 
 		# write data as tables with time/solution coming in pairs (total samples pairs)
-		np.savetxt( Path(paths['output_data'],'true_solution.csv'), np.moveaxis(np.stack((t_true,y_true)),0,1).reshape((-1,args.steps+1)).T,       delimiter=',')
-		np.savetxt( Path(paths['output_data'],'ode_solution.csv'),  np.moveaxis(np.stack((t_ode,y_ode)),0,1).reshape((-1,1001)).T,                 delimiter=',')
+		np.savetxt( Path(paths['out_data'],'true_solution.csv'), np.moveaxis(np.stack((t_true,y_true)),0,1).reshape((-1,args.steps+1)).T,       delimiter=',')
+		np.savetxt( Path(paths['out_data'],'ode_solution.csv'),  np.moveaxis(np.stack((t_ode,y_ode)),0,1).reshape((-1,1001)).T,                 delimiter=',')
 		np.savetxt( Path(data_output+'_learned_solution.csv'),      np.moveaxis(np.stack((t_learned,y_learned)),0,1).reshape((-1,args.steps+1)).T, delimiter=',')
 		np.savetxt( Path(data_output+'_learned_ode_solution.csv'),  np.moveaxis(np.stack((t_learned_ode,y_learned_ode)),0,1).reshape((-1,1001)).T, delimiter=',')
 
@@ -271,7 +271,7 @@ if __name__ == '__main__':
 		# plot exact vector field
 		fig = plt.figure(fig_no); fig_no += 1
 		plt.quiver(X, Y, np.ones_like(X), UV_ode.reshape(X.shape), angles='xy')
-		savefig(Path(paths['output_images'],'ode_vector_field.pdf'), bbox_inches='tight', pad_inches=0.0)
+		savefig(Path(paths['out_images'],'ode_vector_field.pdf'), bbox_inches='tight', pad_inches=0.0)
 
 		# plot learned vector field
 		fig = plt.figure(fig_no); fig_no += 1
@@ -293,4 +293,4 @@ if __name__ == '__main__':
 			# plt.plot(t_train[i], y_train[i], 'ok', markersize=5.0)
 		plt.plot(t0_train, y0_train, 'or', markersize=5.0)
 		# plt.plot(tt, yy, 'or')
-		savefig(Path(paths['output_images'],'training_data.pdf'), bbox_inches='tight', pad_inches=0.0)
+		savefig(Path(paths['out_images'],'training_data.pdf'), bbox_inches='tight', pad_inches=0.0)
