@@ -131,24 +131,24 @@ if __name__ == '__main__':
 
 
 	if args.mode=="train":
-		optimizer  = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.alpha['wdecay'])
+		optimizer1 = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.alpha['wdecay'])
 		optimizer2 = torch.optim.LBFGS(model.parameters(), lr=args.lr, tolerance_grad=1.e-12, tolerance_change=1.e-12, history_size=100, max_iter=20)
-		scheduler = utils.optim.EvenReductionLR(optimizer, lr_reduction=0.1, gamma=0.8, epochs=args.epochs, last_epoch=-1)
+		scheduler = utils.optim.EvenReductionLR(optimizer1, lr_reduction=0.1, gamma=0.8, epochs=args.epochs, last_epoch=-1)
 		# scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=50, verbose=True, threshold=1.e-5, threshold_mode='rel', cooldown=50, min_lr=1.e-6, eps=1.e-8)
 		# scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=500, gamma=0.7, last_epoch=-1)
-		train_model = utils.TrainingLoop(model, loss_fn, dataset, args.batch, optimizer, val_dataset=val_dataset, scheduler=scheduler, val_freq=10, stat_freq=10)
+		train_model = utils.TrainingLoop(model, loss_fn, dataset, args.batch, optimizer1, val_dataset=val_dataset, scheduler=scheduler, val_freq=10, stat_freq=10)
 
 		writer = SummaryWriter(Path("logs",file_name))
 
 		# save initial model and train
-		torch.save( model.state_dict(), Path(paths['checkpoints_0'],file_name) )
+		torch.save( model.state_dict(), Path(paths['chkp_init'],file_name) )
 		try:
 			train_model(args.epochs, writer=writer)
 			train_model(200, writer=writer, optimizer=optimizer2, scheduler=None)
 		except:
 			raise
 		finally:
-			torch.save( model.state_dict(), Path(paths['checkpoints'],file_name) )
+			torch.save( model.state_dict(), Path(paths['chkp_final'],file_name) )
 
 		writer.close()
 
@@ -167,8 +167,8 @@ if __name__ == '__main__':
 		fig_no = 0
 
 
-		images_output = "%s/%s"%(paths['output_images'], args.name)
-		data_output   = "%s/%s"%(paths['output_data'],   args.name)
+		images_output = "%s/%s"%(paths['out_images'], args.name)
+		data_output   = "%s/%s"%(paths['out_data'],   args.name)
 
 		model.eval()
 		rhs_obj = model.rhs
@@ -224,7 +224,7 @@ if __name__ == '__main__':
 		# save data
 
 		# save solutions as tables such that x,y solution components come in pairs (total num_trajectories pairs) along the second dimension
-		np.savetxt( Path(paths['output_data'],'training_data.csv'),                    np.hstack( (t_data.reshape((-1,1)),                 np.concatenate(y_data,  axis=1))                 ),  delimiter=',')
+		np.savetxt( Path(paths['out_data'],'training_data.csv'),                    np.hstack( (t_data.reshape((-1,1)),                 np.concatenate(y_data,  axis=1))                 ),  delimiter=',')
 		np.savetxt( Path(data_output+'_learned_solution_1period.csv'),                 np.hstack( (t_learned.reshape((-1,1))[:args.steps], np.concatenate(y_learned,axis=1)[:args.steps,...])), delimiter=',')
 		np.savetxt( Path(data_output+'_learned_solution_%dperiods.csv'%(periods)),     np.hstack( (t_learned.reshape((-1,1)),              np.concatenate(y_learned,axis=1))                 ), delimiter=',')
 		np.savetxt( Path(data_output+'_learned_ode_solution_%dperiods.csv'%(periods)), np.hstack( (t_learned_ode.reshape((-1,1))[::10,:],  np.concatenate(y_learned_ode,axis=1)[::10,...])   ), delimiter=',')
@@ -236,7 +236,7 @@ if __name__ == '__main__':
 		# plot exact vector field
 		fig = plt.figure(fig_no); fig_no += 1
 		plt.quiver(X, Y, UV_ode[:,0], UV_ode[:,1], angles='xy')
-		savefig(Path(paths['output_images'],'true_vector_field.pdf'), bbox_inches='tight', pad_inches=0.0)
+		savefig(Path(paths['out_images'],'true_vector_field.pdf'), bbox_inches='tight', pad_inches=0.0)
 
 
 		# plot training/validation data
@@ -246,7 +246,7 @@ if __name__ == '__main__':
 			plt.plot(y_data[i,:,0],   y_data[i,:,1],   'or', markersize=4.0)
 			plt.plot(y_data[i+1,:,0], y_data[i+1,:,1], 'ob', markersize=4.0)
 		plt.legend(['validation', 'training'])
-		savefig(Path(paths['output_images'],'training_validation_data.pdf'), bbox_inches='tight', pad_inches=0.0)
+		savefig(Path(paths['out_images'],'training_validation_data.pdf'), bbox_inches='tight', pad_inches=0.0)
 
 
 		# plot learned vector field
@@ -320,7 +320,7 @@ if __name__ == '__main__':
 		# plt.gca().axis('off')
 		plt.xlim(-2, 2)
 		plt.ylim(-2, 2)
-		plt.savefig(Path(paths['output_images'],"true_spectrum.jpg"), bbox_inches='tight', pad_inches=0.0, dpi=300)
+		plt.savefig(Path(paths['out_images'],"true_spectrum.jpg"), bbox_inches='tight', pad_inches=0.0, dpi=300)
 
 
 
