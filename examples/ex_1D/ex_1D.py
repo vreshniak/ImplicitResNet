@@ -115,7 +115,7 @@ if __name__ == '__main__':
 		rhs_steps = args.steps if args.alpha['TV']>=0 else 1
 		rhs    = rhs_mlp(dim, args.width, args.depth, T=args.T, num_steps=rhs_steps, activation=args.sigma, learn_scales=args.learn_scales, learn_shift=args.learn_shift)
 		solver = theta_solver( rhs, args.T, args.steps, args.theta, tol=args.tol )
-		return regularized_ode_solver( solver, args.alpha, mciters=args.mciters, p=2 )
+		return regularized_ode_solver( solver, args.alpha, mciters=args.mciters, p=2, collect_rhs_stat=True )
 	########################################################
 
 	model = torch.nn.Sequential( augment(), ode_block(), output() )
@@ -150,13 +150,13 @@ if __name__ == '__main__':
 		writer = SummaryWriter(Path("logs",file_name))
 
 		# save initial model and train
-		torch.save( model.state_dict(), Path(paths['checkpoints_0'],file_name) )
+		torch.save( model.state_dict(), Path(paths['chkp_init'],file_name) )
 		try:
 			train_model(args.epochs, writer=writer)
 		except:
 			raise
 		finally:
-			torch.save( model.state_dict(), Path(paths['checkpoints'],file_name) )
+			torch.save( model.state_dict(), Path(paths['chkp_final'],file_name) )
 
 		writer.close()
 
@@ -168,7 +168,7 @@ if __name__ == '__main__':
 		fig_no = 0
 
 		# images_output = ("%s/th%4.2f_T%d_data%d_adiv%4.2f"%(Path(paths['output'],'images'), args.theta, args.T, args.datasize, args.adiv)).replace('.','')
-		images_output = "%s/%s"%(Path(paths['output'],'images'), args.name)
+		images_output = "%s/%s"%(paths['out_images'], args.name)
 
 		model.eval()
 
