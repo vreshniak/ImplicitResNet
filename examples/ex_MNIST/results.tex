@@ -18,6 +18,7 @@
 \pgfplotsset{compat=1.15}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \usepgfplotslibrary{statistics}
+\usepgfplotslibrary{colorbrewer}
 \usetikzlibrary{positioning}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -27,6 +28,11 @@
 \makeatother
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\usepackage[usestackEOL]{stackengine}
+
+\graphicspath{{./output/images/}}
+
 
 \begin{document}
 
@@ -41,84 +47,203 @@
 }
 
 
-\begin{table}[t]
-\centering
-\def\arraystretch{2.0}
-	\begin{tabular}{|c|c|c|c|c|c||c|c|c|c|c|}
-		\cline{1-11}
-		\multirow{2}{*}{\shortstack[c]{Noise\\ std}} & \multicolumn{5}{c||}{Top-1 accuracy}  & \multicolumn{5}{c|}{Top-2 accuracy} \\ \cline{2-11}
-		        &  $\theta=0$  &  0.25  &  0.50  &  0.75  & 1.00 &  $\theta=0$  & 0.25  &  0.50  &  0.75  & 1.00
-		\csvreader[column count=15, no head]{output/table.txt}%
-		{1=\one, 2=\two, 3=\three, 4=\four, 5=\five, 6=\six, 7=\seven, 8=\eight, 9=\nine, 10=\ten, 11=\eleven, 12=\twelve, 13=\thirteen, 14=\fourteen, 15=\fifteen}%
-		{\ifthenelse{\equal{\thecsvrow}{1}}{\\\hline}{\\} \one & \four & \five & \six & \seven & \eight &  \eleven & \twelve & \thirteen & \fourteen & \fifteen}
-		\\\hline
-	\end{tabular}
-	\caption{Classifiaction accuracy for different levels of Gaussian noise corruption.}
-	\label{tab:ex_4_noise}
-\end{table}
+
+\section{Clean training data. 1000 MNIST subset}
+
+
+\begin{figure}[h]
+	\centering
+	\pgfplotsset{every tick label/.append style={font=\scriptsize}}
+	\pgfplotsset{every axis label/.append style={font=\scriptsize}}
+
+	\foreach \std in {0.0, 0.1, 0.2, 0.3, 0.4, 0.5}
+	{
+		\foreach \T in {1, 3}
+		{
+			\foreach \mode/\fullmode in {train/Training, valid/Validation}
+			{
+				\begin{tikzpicture}
+					\begin{axis}[
+						%scale=\scale,
+						%scale only axis,
+						% each nth point=1,
+						clip=false,
+						width=0.25\textwidth,
+						ymode = normal,
+						cycle list name = divlist,
+						% cycle list/Dark2,
+						xlabel = lower limit,
+						ylabel = $\theta$,
+						zlabel = \ifthenelse{\equal{\mode}{train}\and\equal{\T}{1}}{$\epsilon$=\std}{},
+						xlabel style={sloped},
+						ylabel style={sloped},
+						% xlabel near ticks,
+						view={45}{35},
+						zmax=100,
+						% title=\ifthenelse{\equal{\std}{0.0}}{\shortstack[c]{$T=\T$\\\fullmode}}{},
+						title=\ifthenelse{\equal{\std}{0.0}}{$T=\T$, \fullmode}{},
+						% very thick,
+						]
+						\addplot3 [mesh, black] table[header=false] {output/data/\mode_accuracy_clean_data_1000_T_\T_adiv_1.00_GN_noise_std_\std.txt};
+						\addplot3 [scatter, only marks] table[header=false] {output/data/\mode_accuracy_clean_data_1000_T_\T_adiv_1.00_GN_noise_std_\std.txt};
+
+						% \node [small dot] at (xticklabel cs:0.5) {};
+					\end{axis}
+				\end{tikzpicture}
+				% \ifthenelse{\equal{\mode}{valid}}{\quad}{}
+			}
+		}
+		\\
+	}
+	\caption{Classification accuracy vs different levels of Gaussian noise data corruption as a function of two hyperparameters: 1) lower limit of the stability function, and 2) $\theta$; $\alpha_{div}=1.0$.}
+\end{figure}
 
 
 
-\begin{figure}[t]
+\begin{figure}[h]
 	\centering
 	\pgfplotsset{every tick label/.append style={font=\scriptsize}}
 
-	\begin{tikzpicture}
-		\begin{axis} [
-				%scale=\scale,
-				%scale only axis,
-				width=0.5\textwidth,
-				each nth point=1,
-				ymode = normal,
-				cycle list name = divlist,
-				xlabel = noise std,
-				title style={font=\small},
-				title=Mean accuracy ($10$ samples),
-				legend entries = {plain,1Lip,$\theta=0.00$,$\theta=0.25$,$\theta=0.50$,$\theta=0.75$,$\theta=1.00$},
-				very thick ]
-				\foreach \i in {1,...,7}
-					\addplot  table[header=false, col sep=comma, y index=\i] {output/table.txt};
-		\end{axis}
-	\end{tikzpicture}
-	\quad
-	% \begin{tikzpicture}
-	% 	\begin{axis} [
-	% 			%scale=\scale,
-	% 			%scale only axis,
-	% 			width=0.5\textwidth,
-	% 			each nth point=1,
-	% 			ymode = normal,
-	% 			cycle list name = divlist,
-	% 			xlabel = noise std,
-	% 			title style={font=\small},
-	% 			legend entries = {$\theta=0.00$,$\theta=0.25$,$\theta=0.50$,$\theta=0.75$,$\theta=1.00$},
-	% 			very thick ]
-	% 			\foreach \i in {6,...,10}
-	% 				\addplot  table[header=false, col sep=comma, y index=\i] {output/table.txt};
-	% 	\end{axis}
-	% \end{tikzpicture}
-	\begin{tikzpicture}
-		\pgfplotstableread[col sep=comma]{output/data/spectral_norm.txt}\loadedtable
-		\pgfplotstabletranspose\datatable{\loadedtable}
-		\begin{axis} [
-				%scale=\scale,
-				%scale only axis,
-				width=0.5\textwidth,
-				each nth point=1,
-				ymode = log,
-				cycle list name = divlist,
-				cycle list shift = 2,
-				xlabel = layer,
-				title style={font=\small},
-				title=Lipschitz constant,
-				% legend entries = {$\theta=0.00$,$\theta=0.25$,$\theta=0.50$,$\theta=0.75$,$\theta=1.00$},
-				% legend pos = outer north east,
-				very thick ]
-				\foreach \i in {3,...,7}
-					\addplot+ [only marks] table[y index=\i] {\datatable};
-		\end{axis}
-	\end{tikzpicture}
+	\foreach \lim in {0.0,-0.2,-0.4,-0.6,-0.8,-1.0}
+	{
+		\foreach \noise in {GN}
+		{
+			\foreach \adiv in {1.00}
+			{
+				\foreach \T in {1, 3}
+				{
+					\foreach \mode/\fullmode in {train/Training, valid/Validation}
+					{
+						\begin{tikzpicture}[trim right=8em]
+							\begin{axis}[
+									%scale=\scale,
+									%scale only axis,
+									width=0.30\textwidth,
+									each nth point=1,
+									ymode = normal,
+									cycle list name = divlist,
+									% cycle list/Dark2,
+									% xlabel = noise std,
+									ymin=55,
+									ymax=105,
+									title style={font=\small},
+									title=\ifthenelse{\equal{\lim}{0.0}}{$T=\T$, \fullmode}{},
+									ylabel=\ifthenelse{\equal{\T}{1}\and\equal{\mode}{train}}{lim=$\lim$}{},
+									legend entries = {plain\phantom{aa},1Lip\phantom{aa},$\theta=0.00$\phantom{aa},$\theta=0.25$\phantom{aa},$\theta=0.50$\phantom{aa},$\theta=0.75$\phantom{aa},$\theta=1.00$\phantom{aa}},
+									legend to name = legendref,
+									% legend pos = outer north east,
+									legend columns = -1,
+									legend style = {draw=none},
+									thick ]
+									\foreach \i in {1,...,7}
+										\addplot  table[header=false, col sep=comma, y index=\i] {output/data/\mode_top_1_accuracy_clean_data_1000_T_\T_adiv_\adiv_lim_\lim_\noise_noise.txt};
+							\end{axis}
+						\end{tikzpicture}
+					}
+				}\\
+			}
+		}
+	}
+	\ref{legendref}
+	\caption{Classification accuracy for different levels of Gaussian noise data corruption and lower limits of the stability function. $a_{div}=1.0$.}
 \end{figure}
 
+
+
+
+\foreach \T in {1,3}
+{
+	\begin{table}[h]
+		\centering
+		\def\arraystretch{2.0}
+		\setlength{\tabcolsep}{4pt}
+		\foreach \lim in {0.0,-0.2,-0.4,-0.6,-0.8,-1.0}
+		{\tiny
+			\input{output/data/table_top_1_data_1000_T_\T_adiv_1.00_lim_\lim_GN_noise.txt}\\[1em]
+		}
+		\caption{Classification accuracy for different levels of Gaussian noise data corruption and lower limits of the stability function. $T=\T$, $a_{div}=1.0$.}
+	\end{table}
+}
+
+
+\foreach \T in {1,3}
+{
+	\begin{figure}[t]
+		\centering
+		\foreach \lim in {0.0,-0.2,-0.4,-0.6,-0.8,-1.0}
+		{
+			\foreach \adiv in {1.00}
+			{
+				\foreach \th in {0.00, 0.25, 0.50, 0.75, 1.00}
+				{
+					\foreach \ode in {0}
+					{
+						\begin{tikzpicture}[trim right=6em]
+							\begin{axis} [
+									%scale=\scale,
+									%scale only axis,
+									width=0.27\textwidth,
+									ymode = normal,
+									xticklabels={,,},
+									yticklabels={,,},
+									enlargelimits=false,
+									axis on top,
+									axis line style={draw=none},
+									title=\ifthenelse{\equal{\lim}{0.0}}{$\theta=\th$}{},
+									ylabel=\ifthenelse{\equal{\th}{0.00}}{lim=$\lim$}{},
+									tick style={draw=none},
+									very thick ]
+									\addplot graphics [points={(0,0) (3,3)}, includegraphics={trim=0 0 0 0,clip}] {clean_data_1000_T_\T_adiv_\adiv_theta_\th_lim_\lim_\ode.ode_spectrum.jpg};
+							\end{axis}
+						\end{tikzpicture}
+					}
+				}
+			}
+			\\
+		}
+	    \caption{Eigenvalues of the vector field along $5$ trajectories. $T=\T$, $a_{div}=1.0$, 0.ode. }
+	\end{figure}
+}
+
+
+\foreach \T in {1,3}
+{
+	\begin{figure}[t]
+		\centering
+		\foreach \adiv in {1.00}
+		{
+			\foreach \th in {0.00, 0.25, 0.50, 0.75, 1.00}
+			{
+				\foreach \adv in { , _adv}
+				{
+					\foreach \lim in {0.0,-0.6,-1.0}
+					{
+						\begin{tikzpicture}[trim right=13em]
+							\begin{axis} [
+									%scale=\scale,
+									%scale only axis,
+									width=0.4\textwidth,
+									ymode = normal,
+									xticklabels={,,},
+									yticklabels={,,},
+									enlargelimits=false,
+									axis on top,
+									axis equal image,
+									axis line style={draw=none},
+									title=\ifthenelse{\equal{\th}{0.00}\and\equal{\adv}{}}{lim=$\lim$}{},
+									ylabel=\ifthenelse{\equal{\lim}{0.0}\and\equal{\adv}{}}{$\theta=\th$}{\phantom{$\theta=\th$}},
+									tick style={draw=none},
+									% very thick,
+									]
+									\addplot graphics [points={(0,0) (8,3)}, includegraphics={trim=0 0 0 0,clip}] {clean_data_1000_T_\T_adiv_\adiv_theta_\th_lim_\lim\adv.jpg};
+							\end{axis}
+						\end{tikzpicture}
+					}\\[-1.8em]
+				}
+			}
+		}
+	    \caption{Learned features for clean and corrupted data. $T=\T$, $a_{div}=1.0$}
+	\end{figure}
+}
 
 \end{document}
