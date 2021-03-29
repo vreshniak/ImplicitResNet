@@ -6,5 +6,5 @@ setup(name="implicitresnet",
 	  package_dir={'implicitresnet': 'implicitresnet'},
 	  author='Viktor Reshniak',
       author_email='reshniakv@ornl.gov',
-      version='0.1.2'
+      version='0.1.3'
       )
