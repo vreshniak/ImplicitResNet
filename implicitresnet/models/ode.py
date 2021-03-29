@@ -391,10 +391,10 @@ def compute_regularizers_and_statistics(solver, input, output):
 		c = (((t+1)/n)**solver.p for t in range(n))
 
 		# evaluate divergence and jacobian along the trajectory
-		if alpha['div']!=0 or alpha['jac']!=0 or _collect_rhs_stat:
+		if alpha['div']!=0 or alpha['jac']!=0 or solver.collect_rhs_stat:
 			divjac = [ calc.trace_and_jacobian( lambda x: rhs(t, x), y, n=solver.mciters) for t, y in zip(solver._t, solver._y) ]
 
-		if _collect_rhs_stat:
+		if solver.collect_rhs_stat:
 			stat['rhs/'+name+'div'] = trapz([divt[0] for divt in divjac], dx)
 			stat['rhs/'+name+'jac'] = trapz([jact[1] for jact in divjac], dx=dx/dim)
 			stat['rhs/'+name+'f']   = trapz([rhs(t,y).pow(2).sum() for t, y in zip(solver._t, solver._y)], dx)
@@ -405,11 +405,11 @@ def compute_regularizers_and_statistics(solver, input, output):
 
 		# jacobian
 		if alpha['jac']!=0:
-			reg[name+'jac'] = alpha['jac'] * (stat['rhs/'+name+'jac'] if _collect_rhs_stat else trapz([jact[1] for jact in divjac], dx=dx/dim))
+			reg[name+'jac'] = alpha['jac'] * (stat['rhs/'+name+'jac'] if solver.collect_rhs_stat else trapz([jact[1] for jact in divjac], dx=dx/dim))
 
 		# magnitude
 		if alpha['f']!=0:
-			reg[name+'f'] = alpha['f'] * (stat['rhs/'+name+'f'] if _collect_rhs_stat else trapz([rhs(t,y).pow(2).sum() for t, y in zip(solver._t, solver._y)], dx))
+			reg[name+'f'] = alpha['f'] * (stat['rhs/'+name+'f'] if solver.collect_rhs_stat else trapz([rhs(t,y).pow(2).sum() for t, y in zip(solver._t, solver._y)], dx))
 
 		# residual
 		if alpha['resid']!=0:
