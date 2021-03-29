@@ -442,7 +442,7 @@ def compute_regularizers_and_statistics(solver, input, output):
 	return None
 
 
-def regularized_ode_solver(solver, alpha={}, stability_limits=None, mciters=1, p=2):
+def regularized_ode_solver(solver, alpha={}, stability_limits=None, mciters=1, p=2, collect_rhs_stat=_collect_rhs_stat, augmentation_loss=None, perturbation=None, perturbation_loss=None):
 	if 'div'   not in alpha: alpha['div']   = 0.0
 	if 'jac'   not in alpha: alpha['jac']   = 0.0
 	if 'f'     not in alpha: alpha['f']     = 0.0
