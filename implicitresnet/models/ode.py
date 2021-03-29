@@ -435,7 +435,7 @@ def compute_regularizers_and_statistics(solver, input, output):
 		else:
 			for key, val in reg.items():
 				solver.regularizer[key] = val
-		if _collect_rhs_stat:
+		if solver.collect_rhs_stat:
 			stat['rhs/'+name+'jac'] = stat['rhs/'+name+'jac'].sqrt()
 			stat['rhs/'+name+'f']   = stat['rhs/'+name+'f'].sqrt()
 			setattr(rhs, 'statistics', stat)
@@ -451,6 +451,7 @@ def regularized_ode_solver(solver, alpha={}, stability_limits=None, mciters=1, p
 	setattr(solver, 'alpha', alpha)
 	setattr(solver, 'mciters', mciters)
 	setattr(solver, 'p', p)
+	setattr(solver, 'collect_rhs_stat', collect_rhs_stat)
 	if stability_limits is not None:
 		min_eig = max(-10, theta_inv_stability_fun(solver.theta, stability_limits[0]) )
 		max_eig = min( 10, theta_inv_stability_fun(solver.theta, stability_limits[2]) )
