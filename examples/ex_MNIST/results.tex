@@ -43,12 +43,149 @@
 	{red},
 	{blue},
 	{orange},
-	{black}
+	{black},
+	% {only marks,red}
 }
 
 
 
 \section{Clean training data. 1000 MNIST subset}
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% plain and 1Lip
+
+
+\begin{figure}[h]
+	\centering
+	\foreach \T in {1,3}
+	{
+		\foreach \arch in {plain, 1Lip}
+		{
+			\foreach \th in {0.00, 0.25, 0.50, 0.75, 1.00}
+			{
+				\foreach \ode in {0}
+				{
+					\begin{tikzpicture}[trim right=6em]
+						\begin{axis} [
+								%scale=\scale,
+								%scale only axis,
+								width=0.25\textwidth,
+								ymode = normal,
+								xticklabels={,,},
+								yticklabels={,,},
+								enlargelimits=false,
+								axis on top,
+								axis line style={draw=none},
+								title=\ifthenelse{\equal{\arch}{plain}\and\equal{\T}{1}}{$\theta=\th$}{},
+								ylabel=\ifthenelse{\equal{\th}{0.00}}{\arch, T=\T}{},
+								tick style={draw=none},
+								very thick ]
+								\addplot graphics [points={(0,0) (3,3)}, includegraphics={trim=0 0 0 0,clip}] {clean_data_1000_T_\T_\arch_theta_\th_\ode.ode_spectrum.jpg};
+						\end{axis}
+					\end{tikzpicture}
+				}
+			}
+			\\[-1.5em]
+		}
+	}
+    \caption{Eigenvalues of the vector field along $5$ trajectories.  0.ode. }
+\end{figure}
+
+
+
+\begin{figure}[h]
+	\centering
+	\pgfplotsset{every tick label/.append style={font=\scriptsize}}
+
+	\foreach \arch in {plain, 1Lip}
+	{
+		\foreach \noise in {GN}
+		{
+			\foreach \T in {1, 3}
+			{
+				\foreach \mode/\fullmode in {train/Training, valid/Validation}
+				{
+					\begin{tikzpicture}[trim right=8em]
+						\begin{axis}[
+								%scale=\scale,
+								%scale only axis,
+								width=0.25\textwidth,
+								each nth point=1,
+								ymode = normal,
+								cycle list name = divlist,
+								% cycle list/Dark2,
+								% xlabel = noise std,
+								ymin=50,
+								ymax=105,
+								title style={font=\small},
+								title=\ifthenelse{\equal{\arch}{plain}}{$T=\T$, \fullmode}{},
+								ylabel=\ifthenelse{\equal{\T}{1}\and\equal{\mode}{train}}{\arch}{},
+								legend entries = {$\theta=0.00$\phantom{aa},$\theta=0.25$\phantom{aa},$\theta=0.50$\phantom{aa},$\theta=0.75$\phantom{aa},$\theta=1.00$\phantom{aa},best\phantom{aa}},
+								legend to name = legendref,
+								% legend pos = outer north east,
+								legend columns = -1,
+								legend style = {draw=none},
+								thick ]
+								\foreach \i in {1,...,5}
+									\addplot  table[header=false, col sep=comma, y index=\i] {output/data/\mode_top_1_accuracy_clean_data_1000_T_\T_\arch_\noise_noise.txt};
+								\addplot [only marks, red, mark size=1pt] table[header=false, col sep=comma] {output/data/best_\mode_accuracy_clean_data_1000_T_\T_adiv_1.00_\noise_noise.txt};
+						\end{axis}
+					\end{tikzpicture}
+				}
+			}
+		}\\[-1.0em]
+	}
+	\ref{legendref}
+	\caption{Classification accuracy for different levels of Gaussian noise data corruption. $a_{div}=0.0$.}
+\end{figure}
+
+
+
+\foreach \T in {1,3}
+{
+	\begin{figure}[t]
+		\centering
+			\foreach \th in {0.00, 0.25, 0.50, 0.75, 1.00}
+			{
+				\foreach \adv in { , _adv}
+				{
+					\foreach \arch in {plain, 1Lip}
+					{
+						\begin{tikzpicture}[trim right=13em]
+							\begin{axis} [
+									%scale=\scale,
+									%scale only axis,
+									width=0.4\textwidth,
+									ymode = normal,
+									xticklabels={,,},
+									yticklabels={,,},
+									enlargelimits=false,
+									axis on top,
+									axis equal image,
+									axis line style={draw=none},
+									title=\ifthenelse{\equal{\th}{0.00}\and\equal{\adv}{}}{\arch}{},
+									ylabel=\ifthenelse{\equal{\arch}{plain}\and\equal{\adv}{}}{$\theta=\th$}{\phantom{$\theta=\th$}},
+									tick style={draw=none},
+									% very thick,
+									]
+									\addplot graphics [points={(0,0) (8,3)}, includegraphics={trim=0 0 0 0,clip}] {clean_data_1000_T_\T_\arch_theta_\th\adv.jpg};
+							\end{axis}
+						\end{tikzpicture}
+					}\\[-1.8em]
+				}
+			}
+	    \caption{Learned features for clean and corrupted data. $T=\T$, $a_{div}=0.0$}
+	\end{figure}
+}
+
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
 
 
 \begin{figure}[h]
@@ -129,14 +266,15 @@
 									title style={font=\small},
 									title=\ifthenelse{\equal{\lim}{0.0}}{$T=\T$, \fullmode}{},
 									ylabel=\ifthenelse{\equal{\T}{1}\and\equal{\mode}{train}}{lim=$\lim$}{},
-									legend entries = {plain\phantom{aa},1Lip\phantom{aa},$\theta=0.00$\phantom{aa},$\theta=0.25$\phantom{aa},$\theta=0.50$\phantom{aa},$\theta=0.75$\phantom{aa},$\theta=1.00$\phantom{aa}},
+									legend entries = {plain\phantom{aa},1Lip\phantom{aa},$\theta=0.00$\phantom{aa},$\theta=0.25$\phantom{aa},$\theta=0.50$\phantom{aa},$\theta=0.75$\phantom{aa},$\theta=1.00$\phantom{aa},best\phantom{aa}},
 									legend to name = legendref,
 									% legend pos = outer north east,
 									legend columns = -1,
 									legend style = {draw=none},
 									thick ]
 									\foreach \i in {1,...,7}
-										\addplot  table[header=false, col sep=comma, y index=\i] {output/data/\mode_top_1_accuracy_clean_data_1000_T_\T_adiv_\adiv_lim_\lim_\noise_noise.txt};
+										\addplot table[header=false, col sep=comma, y index=\i] {output/data/\mode_top_1_accuracy_clean_data_1000_T_\T_adiv_\adiv_lim_\lim_\noise_noise.txt};
+									\addplot [only marks, red, mark size=1pt] table[header=false, col sep=comma] {output/data/best_\mode_accuracy_clean_data_1000_T_\T_adiv_\adiv_\noise_noise.txt};
 							\end{axis}
 						\end{tikzpicture}
 					}

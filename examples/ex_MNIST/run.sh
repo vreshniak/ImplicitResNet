@@ -3,9 +3,16 @@
 for augm in clean; do
 	for data in 1000; do
 		for T in 1 3; do
-			for mode in train test; do
-				python ex_MNIST.py --name "$augm"_data_"$data"_T_"$T"_plain --model 1 --datasize $data --mode $mode --T $T --theta 0.0 --adiv 0.0 --piters 0
-				python ex_MNIST.py --name "$augm"_data_"$data"_T_"$T"_1Lip  --model 1 --datasize $data --mode $mode --T $T --theta 0.0 --adiv 0.0 --piters 1 --stablim 0.0 1.0 2.0
+			for theta in 0.00 0.25 0.50 0.75 1.00; do
+				for mode in train test; do
+					python -W ignore ex_MNIST.py --name "$augm"_data_"$data"_T_"$T"_plain_theta_"$theta" --model 1 --datasize $data --mode $mode --T $T --theta $theta --adiv 0.0 --piters 0
+				done
+			done
+
+			for theta in 0.00 0.25 0.50 0.75 1.00; do
+				for mode in train test; do
+					python -W ignore ex_MNIST.py --name "$augm"_data_"$data"_T_"$T"_1Lip_theta_"$theta" --model 1 --datasize $data --mode $mode --T $T --theta $theta --adiv 0.0 --piters 1 --eiglim -1.0 0.0 1.0
+				done
 			done
 
 			for adiv in 1.00; do
@@ -22,6 +29,6 @@ for augm in clean; do
 done
 
 python make_table.py
-pdflatex results.tex
+pdflatex --extra-mem-bot=10000000 results.tex
 rm *.aux *.log *.bak
 # open results.pdf
