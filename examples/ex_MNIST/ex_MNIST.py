@@ -307,8 +307,8 @@ if __name__ == '__main__':
 		print("%d->%d(%6.2f): "%(y[0].item(), clean_conf_score.argmax(), np.amax(clean_conf_score)), clean_conf_score)
 		print("%d->%d(%6.2f): "%(y[0].item(), adver_conf_score.argmax(), np.amax(adver_conf_score)), adver_conf_score)
 		fig = plt.figure(fig_no); fig_no += 1
-		plt.imshow(adv_x[0,0,...].cpu().detach().numpy(), cmap='gray');  ex_setup.savefig(images_output+"_layer_0_ch_0_adv", format='jpg')
-		plt.imshow(x[0,0,...].cpu().detach().numpy(),     cmap='gray');  ex_setup.savefig(images_output+"_layer_0_ch_0",     format='jpg')
+		# plt.imshow(adv_x[0,0,...].cpu().detach().numpy(), cmap='gray');  ex_setup.savefig(images_output+"_layer_0_ch_0_adv", format='jpg')
+		# plt.imshow(x[0,0,...].cpu().detach().numpy(),     cmap='gray');  ex_setup.savefig(images_output+"_layer_0_ch_0",     format='jpg')
 		collage = []
 		collage_adv = []
 		for l, m in enumerate(model):
@@ -342,23 +342,23 @@ if __name__ == '__main__':
 				Path(paths['out_data'],attk_name).mkdir(parents=True, exist_ok=True)
 				for key, loader in dataloaders.items():
 					adv_out   = deque([])
-					score     = deque([])
-					adv_score = deque([])
+					# score     = deque([])
+					# adv_score = deque([])
 					labels    = deque([])
 					for sample in loader:
-						for _ in range(1 if attk_name!='GN' else 5):
+						for _ in range(1 if attk_name!='GN' else 1):
 							x, y = sample[0].to(_device), sample[1].to(_device)
-							prob     = torch.nn.functional.softmax(model(x),         dim=1)
+							# prob     = torch.nn.functional.softmax(model(x),         dim=1)
 							adv_prob = torch.nn.functional.softmax(model(attk(x,y)), dim=1)
 
 							adv_out.append(adv_prob.detach().cpu())
-							score.append(prob.amax(dim=1).detach().cpu())
-							adv_score.append(adv_prob.amax(dim=1).detach().cpu())
+							# score.append(prob.amax(dim=1).detach().cpu())
+							# adv_score.append(adv_prob.amax(dim=1).detach().cpu())
 							labels.append(y)
 					adv_out   = torch.cat(list(adv_out))
 					labels    = torch.cat(list(labels)).reshape((-1,1))
-					score     = torch.cat(list(score))
-					adv_score = torch.cat(list(adv_score))
+					# score     = torch.cat(list(score))
+					# adv_score = torch.cat(list(adv_score))
 
 					accuracy  = ex_setup.topk_acc(adv_out,labels,(1,2,3,4,5))
 
