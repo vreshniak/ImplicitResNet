@@ -199,7 +199,7 @@ if __name__ == '__main__':
 				if i%2==0:
 					epoch = epoch + 30
 					i += 1
-					train_model(30, writer=writer)
+					converged = train_model(30, writer=writer)
 					for m in model.modules():
 						if isinstance(m,theta_solver):
 							m.regularizer = {}
@@ -208,19 +208,21 @@ if __name__ == '__main__':
 				else:
 					epoch = epoch + 20
 					i += 1
-					train_model(20, writer=writer)
+					converged = train_model(20, writer=writer)
 					for m in model.modules():
 						if isinstance(m,theta_solver):
 							m.regularizer = {}
 							for key in m.alpha.keys(): m.alpha[key] = alpha[key]
 							m.rhs.unfreeze_shift()
-			# train_model(args.epochs, writer=writer)
-			for m in model.modules():
-				if isinstance(m,theta_solver):
-					m.regularizer = {}
-					for key in m.alpha.keys(): m.alpha[key] = 0.0
-					m.rhs.freeze_shift()
-			train_model(100, writer=writer, optimizer=optimizer, scheduler=None)
+				if converged: break
+			if not converged:
+				# train_model(args.epochs, writer=writer)
+				for m in model.modules():
+					if isinstance(m,theta_solver):
+						m.regularizer = {}
+						for key in m.alpha.keys(): m.alpha[key] = 0.0
+						m.rhs.freeze_shift()
+				train_model(100, writer=writer, optimizer=optimizer, scheduler=None)
 		except:
 			raise
 		finally:
