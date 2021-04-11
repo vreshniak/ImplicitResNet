@@ -114,8 +114,11 @@ class TrainingLoop:
 
 		sec = 0
 		epoch_loss = 1.0
+		converged = False
 		for epoch in range(1,epochs+1):
-			if epoch_loss<=self.tol: break
+			if epoch_loss<=self.tol:
+				converged = True
+				break
 			self.curr_epoch += 1
 
 			self.model.train()
@@ -292,7 +295,7 @@ class TrainingLoop:
 							torch.save(self.model.state_dict(), Path(self.checkpoints['dir'],"best_val_accuracy",self.checkpoints['name']))
 							print("checkpoint best validation accuracy")
 
-
+		return converged
 
 ###############################################################################
 ###############################################################################
