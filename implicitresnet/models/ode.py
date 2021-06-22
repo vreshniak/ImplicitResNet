@@ -219,6 +219,14 @@ class ode_solver(torch.nn.Module, metaclass=ABCMeta):
 	########################################
 
 
+	def trajectory(self, x):
+		old_ind_out = self.ind_out
+		self.ind_out = torch.arange(self.num_steps+1)
+		odesol = self.forward(x)
+		self.ind_out = old_ind_out
+		return odesol
+
+
 	def forward(self, y0, t0=0, return_t=False):
 		if self.training or self._ind_out is not None:
 			# evaluate solution at the grid points
