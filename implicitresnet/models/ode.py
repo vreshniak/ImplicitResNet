@@ -375,12 +375,22 @@ def theta_inv_stability_fun(theta, y):
 #######################################
 
 
+#######################################
+# quadrature rules
 def trapz(y, dx=1.0):
-	res = 0.5 * y[0]
-	for i in range(1,len(y)-1):
-		res = res + y[i]
-	res = res + 0.5 * y[-1]
-	return res * dx
+	res = 0.5 * (y[0] + y[-1]) + sum(y[1:-1])
+	return dx * res
+
+# def trapz(y, dx=1.0):
+# 	res = 0.5 * y[0]
+# 	for i in range(1,len(y)-1):
+# 		res = res + y[i]
+# 	res = res + 0.5 * y[-1]
+# 	return res * dx
+
+def rect(y, dx=1.0):
+	return dx * sum(y)
+#######################################
 
 
 # forward hook to evaluate regularizers and statistics
