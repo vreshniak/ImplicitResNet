@@ -364,13 +364,16 @@ class theta_solver(ode_solver):
 ###############################################################################
 
 
-
+#######################################
+# stability function and its inverse
 def theta_stability_fun(theta, x):
 	return (1+(1-theta)*x) / (1-theta*x)
 
 def theta_inv_stability_fun(theta, y):
 	y = max(y, 1 - 1.0/(theta+1.e-12) + 1.e-6)
 	return (1-y) / ((1-y)*theta-1)
+#######################################
+
 
 def trapz(y, dx=1.0):
 	res = 0.5 * y[0]
