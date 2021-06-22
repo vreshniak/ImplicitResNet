@@ -310,6 +310,7 @@ class theta_solver(ode_solver):
 
 	def ode_step(self, t, x):
 		iters = resid = flag = 0
+		fevals = 1
 
 		start = time.time()
 		if self.theta>0:
@@ -326,7 +327,7 @@ class theta_solver(ode_solver):
 				self.rhs.eval() # note that self.training remains unchanged
 
 				# solve nonlinear system
-				y, resid, iters, flag = nsolve( residual_fn, x, _nsolver, tol=self.tol, max_iters=_max_iters )
+				y, resid, iters, fevals, flag = nsolve( residual_fn, x, _nsolver, tol=self.tol, max_iters=_max_iters )
 
 				# assert not torch.isnan(resid), "NaN value in the residual of the %s nsolver for layer %s at t=%d"%(_nsolver, self.name, t)
 				if _debug:
@@ -353,6 +354,7 @@ class theta_solver(ode_solver):
 			self._stat[mode+'steps']    = self._stat.get(mode+'steps',0)    + 1
 			self._stat[mode+'walltime'] = self._stat.get(mode+'walltime',0) + (stop-start)
 			self._stat[mode+'iters']    = self._stat.get(mode+'iters',0)    + iters
+			self._stat[mode+'fevals']   = self._stat.get(mode+'fevals',0)   + fevals
 			self._stat[mode+'residual'] = self._stat.get(mode+'residual',0) + resid
 		return y
 
