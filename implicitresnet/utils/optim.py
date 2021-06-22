@@ -51,6 +51,7 @@ class TrainingLoop:
 		self.writer      = writer
 		self.hist_freq   = hist_freq
 		self.curr_epoch  = init_epoch
+		self.min_epochs  = min_epochs
 		self.val_freq    = val_freq
 		self.stat_freq   = stat_freq
 
@@ -129,7 +130,7 @@ class TrainingLoop:
 		epoch_loss = 1.0
 		converged = False
 		for epoch in range(1,epochs+1):
-			if epoch_loss<=self.tol:
+			if epoch_loss<=self.tol and self.curr_epoch>self.min_epochs:
 				converged = True
 				break
 			self.curr_epoch += 1
