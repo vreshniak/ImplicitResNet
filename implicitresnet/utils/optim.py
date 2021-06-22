@@ -94,9 +94,15 @@ class TrainingLoop:
 
 		# evaluate regularizers which are model properties
 		for name, module in self.model.named_modules():
-			for key, value in getattr(module,'regularizer',{}).items():
-				reg = reg + value
-				reg_items[key] = reg_items.get(key,0) + value.detach()
+			if hasattr(module,'regularizer'):
+				for key, value in module.regularizer.items():
+					reg = reg + value
+					reg_items[key] = reg_items.get(key,0) + value.detach()
+				# regularizers should be evaluated only once and then freed
+				module.regularizer = {}
+			# for key, value in getattr(module,'regularizer',{}).items():
+			# 	reg = reg + value
+			# 	reg_items[key] = reg_items.get(key,0) + value.detach()
 
 		# evaluate accuracy
 		_, acc_items = as_sum_and_dict(self.accuracy_fn(y_pred, y) if self.accuracy_fn is not None else None)
