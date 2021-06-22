@@ -37,7 +37,7 @@ def as_sum_and_dict(value):
 class TrainingLoop:
 	def __init__(self, model, loss_fn, dataset, batch_size, optimizer, data_augmentation=None, tol=1.e-12,
 		val_dataset=None, val_batch_size=-1, accuracy_fn=None, regularizer=None, scheduler=None, lr_schedule=None,
-		checkpoints=None, writer=None, write_hist=False, init_epoch=0, val_freq=1, stat_freq=1, pin_memory=False):
+		checkpoints=None, writer=None, init_epoch=0, min_epochs=0, val_freq=1, stat_freq=1, hist_freq=0, pin_memory=False):
 		self.model       = model
 		self.loss_fn     = loss_fn
 		self.optimizer   = optimizer
@@ -49,7 +49,7 @@ class TrainingLoop:
 		self.lr_schedule = lr_schedule
 		self.checkpoints = checkpoints
 		self.writer      = writer
-		self.write_hist  = write_hist
+		self.hist_freq   = hist_freq
 		self.curr_epoch  = init_epoch
 		self.val_freq    = val_freq
 		self.stat_freq   = stat_freq
@@ -103,6 +103,17 @@ class TrainingLoop:
 		return loss, reg, loss_items, reg_items, acc_items
 
 
+	def log_histograms(self, epoch, epochs):
+		if self.hist_freq>0:
+			if epoch%self.hist_freq==0 or epoch==epochs:
+				for name, weight in self.model.named_parameters():
+					self.writer.add_histogram('parameters/'+name,    weight,      self.curr_epoch, bins='tensorflow')
+					if weight.grad is not None:
+						self.writer.add_histogram('gradients/'+name,     weight.grad, self.curr_epoch, bins='tensorflow')
+					# writer.add_scalar('mean_param_value/'+name, weight.abs().mean(),      self.curr_epoch)
+					# writer.add_scalar('mean_param_grad/'+name,  weight.grad.abs().mean(), self.curr_epoch)
+
+
 	def __call__(self, epochs, **kwargs):
 		# override default parameters
 		for key, val in kwargs.items():
@@ -111,6 +122,8 @@ class TrainingLoop:
 
 		# model device
 		device = self.model.parameters().__next__().device
+
+		self.log_histograms(self.curr_epoch, self.curr_epoch+epochs)
 
 		sec = 0
 		epoch_loss = 1.0
@@ -258,14 +271,8 @@ class TrainingLoop:
 					print(message)
 					sec = 0
 
-				if self.write_hist:
-					if epoch%self.hist_freq==0 or epoch==epochs:
-						for name, weight in self.model.named_parameters():
-							if weight.grad is not None:
-								writer.add_histogram('parameters/'+name,    weight,      self.curr_epoch, bins='tensorflow')
-								writer.add_histogram('gradients/'+name,     weight.grad, self.curr_epoch, bins='tensorflow')
-								# writer.add_scalar('mean_param_value/'+name, weight.abs().mean(),      self.curr_epoch)
-								# writer.add_scalar('mean_param_grad/'+name,  weight.grad.abs().mean(), self.curr_epoch)
+
+				self.log_histograms(self.curr_epoch, self.curr_epoch+epochs)
 
 
 			if self.checkpoints is not None:
