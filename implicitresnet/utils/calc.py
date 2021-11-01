@@ -169,6 +169,7 @@ class JacDiagReg(torch.nn.Module):
 
 
 
+###############################################################################
 
 def jacobian(output, input, create_graph=False):
 	jacobian = []
@@ -189,6 +190,22 @@ def jacobian(output, input, create_graph=False):
 		Id.data.flatten()[i] = 0.0
 	return torch.stack(jacobian, dim=0).reshape(output.shape+input.shape)
 
+
+def hessian(output, input, create_graph=False):
+	# assert output.size(1)==1, "output must be scalar function, got output.size(1)="+str(output.size(1))
+
+	# gradient of output
+	output_grad = torch.autograd.grad(
+		outputs=output,
+		inputs=input,
+		create_graph=True,  # need create_graph to find it's derivative
+		only_inputs=True)[0]
+
+	hessian = jacobian(output_grad, input, create_graph)
+	return hessian
+
+
+###############################################################################
 
 # def divergence(output, input, create_graph=False):
 # 	jac = jacobian(output, input, create_graph).reshape((output.shape[0],output.numel()//output.shape[0],input.shape[0],input.numel()//input.shape[0]))
