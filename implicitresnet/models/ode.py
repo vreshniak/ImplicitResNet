@@ -58,7 +58,7 @@ class linsolve_backprop(torch.autograd.Function):
 		dx, error, lin_iters, flag = linsolve( matvec, dy.reshape((batch_dim,-1)), dy.reshape((batch_dim,-1)), _lin_solver, max_iters=_max_lin_iters)
 		dx = dx.view_as(dy)
 
-		assert not torch.isnan(error), "NaN value in the backprop error of the linear solver for ode %s"%(_nsolver, ctx.self.name)
+		assert not torch.isnan(error), "NaN value in the backprop error of the linear solver for ode %s"%(ctx.self.name)
 		if _debug:
 			resid1 = matvec(dy).sum()
 			resid2 = matvec(dy).sum()
@@ -75,6 +75,7 @@ class linsolve_backprop(torch.autograd.Function):
 			ctx.self._stat['backward/walltime']     = ctx.self._stat.get('backward/walltime',0)     + (stop-start)
 			ctx.self._stat['backward/lin_residual'] = ctx.self._stat.get('backward/lin_residual',0) + error
 			ctx.self._stat['backward/lin_iters']    = ctx.self._stat.get('backward/lin_iters',0)    + lin_iters
+			#ctx.self._stat['backward/dy_norm']      = ctx.self._stat.get('backward/dy_norm',0)      + dy.reshape((batch_dim,-1)).norm(dim=1).amax()
 
 		return None, None, dx, None
 
@@ -328,6 +329,7 @@ class theta_solver(ode_solver):
 
 				# solve nonlinear system
 				y, resid, iters, fevals, flag = nsolve( residual_fn, x, _nsolver, tol=self.tol, max_iters=_max_iters )
+				assert not torch.isnan(resid), "NaN value in the residual of the nonlinear solver for ode %s"%(self.name)
 
 				# assert not torch.isnan(resid), "NaN value in the residual of the %s nsolver for layer %s at t=%d"%(_nsolver, self.name, t)
 				if _debug:
@@ -365,13 +367,13 @@ class theta_solver(ode_solver):
 
 
 #######################################
-# stability function and its inverse
-def theta_stability_fun(theta, x):
-	return (1+(1-theta)*x) / (1-theta*x)
+# # stability function and its inverse
+# def theta_stability_fun(theta, x):
+# 	return (1+(1-theta)*x) / (1-theta*x)
 
-def theta_inv_stability_fun(theta, y):
-	y = max(y, 1 - 1.0/(theta+1.e-12) + 1.e-6)
-	return (1-y) / ((1-y)*theta-1)
+# def theta_inv_stability_fun(theta, y):
+# 	y = max(y, 1 - 1.0/(theta+1.e-12) + 1.e-6)
+# 	return (1-y) / ((1-y)*theta-1)
 #######################################
 
 
@@ -394,61 +396,118 @@ def rect(y, dx=1.0):
 
 
 # forward hook to evaluate regularizers and statistics
-def compute_regularizers_and_statistics(solver, input, output):
+def old_compute_regularizers_and_statistics(solver, input, output):
 	reg   = {}
 	stat  = {}
 	if solver.training:
-		rhs   = solver.rhs
-		name  = solver.name+'_'
-		alpha = solver.alpha
+		rhs        = solver.rhs
+		name       = solver.name+'_'
+		alpha      = solver.alpha
+		theta      = solver.theta
+		steps      = solver.num_steps
+		quadrature = solver.quadrature
+		stabval    = solver.stabval
+		batch_dim  = input[0].size(0)
+		dim        = input[0].numel() / batch_dim
+		dx         = 1 / steps / dim
 
-		n     = len(solver._t)
-		steps = n - 1
-		dim   = input[0].numel() / input[0].size(0)
-		dx    = 1 / steps / dim
+		# temporal quadrature rule
+		if quadrature=='trapezoidal':
+			integrate = trapz
+			# contribution of divergence along the trajectory
+			c = ( ((t+1)/(steps+1))**solver.p for t in range(steps+1) )
+		elif quadrature=='rectangle':
+			integrate = rect
+			c = ( ((t+1)/(steps))**solver.p for t in range(steps) )
+		def quadrature_points():
+			if quadrature=='trapezoidal':
+				q_t = solver._t
+				q_y = solver._y
+			elif quadrature=='rectangle':
+				# if theta==1, use left endpoint
+				q_t = ( solver._t[i-1]+theta*solver.h if theta<1 else solver._t[i-1] for i in range(1,solver.num_steps+1) )
+				q_y = ( (1-theta)*solver._y[i-1]+theta*solver._y[i] for i in range(1,solver.num_steps+1) )
+			return q_t, q_y
+
 
 		# spectral normalization has to be performed only once per forward pass, so freeze here
 		rhs.eval()
 
-		# contribution of divergence along the trajectory
-		c = (((t+1)/n)**solver.p for t in range(n))
-
 		# evaluate divergence and jacobian along the trajectory
 		if alpha['div']!=0 or alpha['jac']!=0 or solver.collect_rhs_stat:
-			divjac = [ calc.trace_and_jacobian( lambda x: rhs(t, x), y, n=solver.mciters) for t, y in zip(solver._t, solver._y) ]
+			# if not hasattr(solver, 'trace_weight'):
+			# 	solver.trace_weight = torch.ones_like(input[0])
+			div = []
+			for t, y in zip(*quadrature_points()):
+				jacdiag = calc.jacobian_diag( lambda x: rhs(t, x), y, n=solver.mciters )
+				if stabval is None:
+					weight = 1
+				else:
+					weight = jacdiag>theta_inv_stability_fun(theta,stabval) #torch.heaviside( jacdiag - theta_inv_stability_fun(theta,stabval), torch.tensor([0.0]) ).detach()
+					dx = 1.0 / steps / (weight.sum()/batch_dim)
+				div.append( (weight*jacdiag).sum()/batch_dim )
+				if stabval is not None and weight.sum()<0.8*input[0].numel():
+					solver.reduce = True
+			# jacdiag = [ calc.jacobian_diag( lambda x: rhs(t, x), y, n=solver.mciters) for t, y in zip(*quadrature_points()) ]
+			# divjac = [ calc.trace_and_jacobian( lambda x: rhs(t, x), y, n=solver.mciters, min_eig=theta_inv_stability_fun(solver.theta,0.0)) for t, y in zip(solver._t, solver._y) ]
+			# divjac = [ calc.partial_trace( lambda x: rhs(t, x), y, n=solver.mciters, fraction=0.8) for t, y in zip(solver._t, solver._y) ]
+			# buf = 0
+			# for dj in divjac:
+			# 	# buf += dj[2]
+			# 	if dj[2]<0.8*input[0].numel(): solver.reduce = True
+			# w = buf / input[0].numel() / len(solver._t)
 
-		if solver.collect_rhs_stat:
-			stat['rhs/'+name+'div'] = trapz([divt[0] for divt in divjac], dx)
-			stat['rhs/'+name+'jac'] = trapz([jact[1] for jact in divjac], dx=dx/dim)
-			stat['rhs/'+name+'f']   = trapz([rhs(t,y).pow(2).sum() for t, y in zip(solver._t, solver._y)], dx)
+		if alpha['f']!=0 or solver.collect_rhs_stat:
+			vfield = [ rhs(t,y).pow(2).sum() for t, y in zip(*quadrature_points()) ]
 
 		# divergence
 		if alpha['div']!=0:
-			reg[name+'div'] = alpha['div'] * torch.sigmoid( trapz([ct*divt[0] for ct, divt in zip(c, divjac)], dx) )
+			reg[name+'div'] = alpha['div'] * torch.sigmoid( integrate([ct*divt for ct, divt in zip(c, div)], dx) )
 
-		# jacobian
-		if alpha['jac']!=0:
-			reg[name+'jac'] = alpha['jac'] * (stat['rhs/'+name+'jac'] if solver.collect_rhs_stat else trapz([jact[1] for jact in divjac], dx=dx/dim))
 
-		# magnitude
-		if alpha['f']!=0:
-			reg[name+'f'] = alpha['f'] * (stat['rhs/'+name+'f'] if solver.collect_rhs_stat else trapz([rhs(t,y).pow(2).sum() for t, y in zip(solver._t, solver._y)], dx))
 
-		# residual
-		if alpha['resid']!=0:
-			for step in range(n-1):
-				x, y = solver._y[step].detach(), solver._y[step+1].detach()
-				reg[name+'residual'] = reg.get(name+'residual',0) + solver.residual(solver._t[step], x, y)
-			reg[name+'residual'] = (alpha['resid'] / steps) * reg[name+'residual']
+		if solver.collect_rhs_stat:
+			stat['rhs/'+name+'div'] = integrate([divt for divt in div], dx)
+			# stat['rhs/'+name+'jac'] = integrate([jact[1] for jact in divjac], dx=dx/dim)
+			# stat['rhs/'+name+'f']   = integrate(vfield, dx)
 
-		# 'Total variation'
-		if alpha['TV']!=0 and len(rhs.F)>1:
-			w1 = torch.nn.utils.parameters_to_vector(rhs.F[0].parameters())
-			for t in range(len(rhs.F)-1):
-				w2 = torch.nn.utils.parameters_to_vector(rhs.F[t+1].parameters())
-				reg[name+'TV'] = reg.get(name+'TV',0) + ( w2 - w1 ).pow(2).sum()
-				w1 = w2
-			reg[name+'TV'] = (alpha['TV'] / steps) * reg[name+'TV']
+		# # divergence
+		# if alpha['div']!=0:
+		# 	reg[name+'div'] = alpha['div'] * torch.sigmoid( integrate([ct*divt[0] for ct, divt in zip(c, divjac)], dx) )
+
+		# # jacobian
+		# if alpha['jac']!=0:
+		# 	reg[name+'jac'] = alpha['jac'] * (stat['rhs/'+name+'jac'] if solver.collect_rhs_stat else integrate([jact[1] for jact in divjac], dx=dx/dim))
+
+		# # magnitude
+		# if alpha['f']!=0:
+		# 	reg[name+'f'] = alpha['f'] * (stat['rhs/'+name+'f'] if solver.collect_rhs_stat else integrate([rhs(t,y).pow(2).sum() for t, y in zip(solver._t, solver._y)], dx))
+
+		# # residual
+		# if alpha['resid']!=0:
+		# 	for step in range(steps):
+		# 		x, y = solver._y[step].detach(), solver._y[step+1].detach()
+		# 		reg[name+'residual'] = reg.get(name+'residual',0) + solver.residual(solver._t[step], x, y)
+		# 	reg[name+'residual'] = (alpha['resid'] / steps) * reg[name+'residual']
+
+		# # data augmentation
+		# if alpha['daugm']!=0:
+		# 	reg[name+'daugm'] = alpha['daugm'] * solver.augmentation_loss(solver._y[-1])
+
+		# # hidden layer perturbation
+		# if alpha['perturb']!=0:
+		# 	x_perturb = solver_y[0] + solver.perturbation(solver_y[0])
+		# 	y_perturb = solver.forward(x_perturb.detach())
+		# 	reg[name+'perturb'] = alpha['perturb'] * solver.perturbation_loss(y_perturb, solver._y[-1])
+
+		# # 'Total variation'
+		# if alpha['TV']!=0 and len(rhs.F)>1:
+		# 	w1 = torch.nn.utils.parameters_to_vector(rhs.F[0].parameters())
+		# 	for t in range(len(rhs.F)-1):
+		# 		w2 = torch.nn.utils.parameters_to_vector(rhs.F[t+1].parameters())
+		# 		reg[name+'TV'] = reg.get(name+'TV',0) + ( w2 - w1 ).pow(2).sum()
+		# 		w1 = w2
+		# 	reg[name+'TV'] = (alpha['TV'] / steps) * reg[name+'TV']
 
 		# note that solver.training has not been changed by rhs.eval()
 		rhs.train(mode=solver.training)
@@ -459,26 +518,182 @@ def compute_regularizers_and_statistics(solver, input, output):
 			for key, val in reg.items():
 				solver.regularizer[key] = val
 		if solver.collect_rhs_stat:
-			stat['rhs/'+name+'jac'] = stat['rhs/'+name+'jac'].sqrt()
-			stat['rhs/'+name+'f']   = stat['rhs/'+name+'f'].sqrt()
+			# stat['rhs/'+name+'jac'] = stat['rhs/'+name+'jac'].sqrt()
+			# stat['rhs/'+name+'f']   = stat['rhs/'+name+'f'].sqrt()
 			setattr(rhs, 'statistics', stat)
 	return None
 
 
-def regularized_ode_solver(solver, alpha={}, stability_limits=None, mciters=1, p=2, collect_rhs_stat=_collect_rhs_stat, augmentation_loss=None, perturbation=None, perturbation_loss=None):
+def old_regularized_ode_solver(solver, alpha={}, stability_limits=None, mciters=1, p=2, quadrature='rectangle', stability_target=None, collect_rhs_stat=_collect_rhs_stat, augmentation_loss=None, perturbation=None, perturbation_loss=None):
 	if 'div'   not in alpha: alpha['div']   = 0.0
 	if 'jac'   not in alpha: alpha['jac']   = 0.0
 	if 'f'     not in alpha: alpha['f']     = 0.0
 	if 'resid' not in alpha: alpha['resid'] = 0.0
 	if 'TV'    not in alpha: alpha['TV']    = 0.0
+	# if 'daugm' not in alpha:
+	# 	alpha['daugm'] = 0.0
+	# else:
+	# 	if augmentation_loss is None: augmentation_loss = lambda x: (x[:x.size(0)//2,...]-x[x.size(0)//2:,...]).pow(2).sum()
+	# 	setattr(solver, 'augmentation_loss', augmentation_loss)
+	# if 'perturb' not in alpha:
+	# 	alpha['perturb'] = 0.0
+	# else:
+	# 	if alpha['perturb']!=0: assert perturbation is not None, "if alpha['perturb'] != 0, perturbation must be given"
+	# 	if perturbation_loss is None: perturbation_loss = lambda x,y: (x-y).pow(2).sum()
+	# 	setattr(solver, 'perturbation',      perturbation)
+	# 	setattr(solver, 'perturbation_loss', perturbation_loss)
 	setattr(solver, 'alpha', alpha)
 	setattr(solver, 'mciters', mciters)
 	setattr(solver, 'p', p)
+	setattr(solver, 'quadrature', quadrature)
+	setattr(solver, 'stabval', stability_target)
 	setattr(solver, 'collect_rhs_stat', collect_rhs_stat)
 	if stability_limits is not None:
-		min_eig = max(-10, theta_inv_stability_fun(solver.theta, stability_limits[0]) )
-		max_eig = min( 10, theta_inv_stability_fun(solver.theta, stability_limits[2]) )
+		if stability_target is not None:
+			minstab_lim = theta_inv_stability_fun(solver.theta, stability_target)
+			stab_lim    = theta_inv_stability_fun(solver.theta, stability_limits[0])
+			min_eig = max(-20, minstab_lim - min(2.0,minstab_lim-stab_lim) )
+		else:
+			min_eig = max(-20, theta_inv_stability_fun(solver.theta, stability_limits[0]) )
+		max_eig = min( 20, theta_inv_stability_fun(solver.theta, stability_limits[2]) )
 		ini_eig = theta_inv_stability_fun(solver.theta, stability_limits[1])
 		solver.rhs.set_spectral_limits([min_eig,ini_eig,max_eig])
+	if stability_target is not None:
+		center_final = theta_inv_stability_fun(solver.theta, stability_target)
+		solver.rhs.set_circle_limits( center_limits=[0.0, center_final], radius_limits=[1.0, 0.1] )
+	solver.register_forward_hook(compute_regularizers_and_statistics)
+	return solver
+
+
+
+# forward hook to evaluate regularizers and statistics
+def compute_regularizers_and_statistics(solver, input, output):
+	reg   = {}
+	stat  = {}
+	if solver.training:
+		# rhs        = solver.rhs
+		name       = solver.name+'_'
+		# alpha      = solver.r_alpha
+		# theta      = solver.theta
+		# steps      = solver.num_steps
+		# stabval    = solver.stabval
+		batch_dim  = input[0].size(0)
+		dim        = input[0].numel() / batch_dim
+
+		# spectral normalization has to be performed only once per forward pass, so freeze here
+		solver.rhs.eval()
+
+
+		#######################################################################
+		# evaluate quantities for regularizers
+		# quadrature points to evaluate temporal integrals
+		qt, qy = solver.r_quadrature_points()
+
+		if solver.r_alpha['div']!=0 or solver.r_collect_rhs_stat:
+			# int_div = solver.r_integrate( lambda t,y: calc.jacobian_diag(lambda x: solver.rhs(t, x), y).sum() / batch_dim ) / dim
+			int_div = solver.r_integrate([ calc.jacobian_diag(lambda x: solver.rhs(t, x), y).sum()/batch_dim for t,y in zip(qt,qy) ]) / dim
+
+		if solver.r_alpha['cnt']!=0 or solver.r_alpha['rad']!=0 or solver.r_collect_rhs_stat:
+			center, radius   = solver.rhs.center,  solver.rhs.radius
+			stabmin, stabmax = solver.rhs.stabmin, solver.rhs.stabmax
+			regcenter = center if stabmin is None else stabmin
+			regradius = radius if stabmin is None else torch.nn.functional.relu(stabmax-stabmin)
+			# stabcenter, radius = solver.rhs.get_spectral_circle(stability_circle=True)
+
+		#######################################################################
+		# regularizers
+		# divergence regularizer
+		if solver.r_alpha['div']!=0:
+			reg[name+'div'] = solver.r_alpha['div'] * torch.sigmoid(int_div)
+
+		# spectral center regularizer
+		if solver.r_alpha['cnt']!=0:
+			reg[name+'cnt'] = solver.r_alpha['cnt'] * regcenter
+
+		# spectral radius regularizer
+		if solver.r_alpha['rad']!=0:
+			reg[name+'rad'] = solver.r_alpha['rad'] * regradius
+
+		#######################################################################
+		# statistics
+		if solver.r_collect_rhs_stat:
+			# stabcenter, radius = solver.rhs.get_stability_circle()
+			center, radius = solver.rhs.get_spectral_circle()
+			stat['rhs/'+name+'div'] = int_div
+			stat['rhs/'+name+'cnt'] = center
+			stat['rhs/'+name+'rad'] = radius
+			if stabmin is not None:
+				stat['rhs/'+name+'stabmin'] = stabmin
+				stat['rhs/'+name+'stabmax'] = stabmax
+
+
+
+		# note that solver.training has not been changed by rhs.eval()
+		solver.rhs.train(mode=solver.training)
+
+		if not hasattr(solver, 'regularizer'):
+			setattr(solver, 'regularizer', reg)
+		else:
+			for key, val in reg.items():
+				solver.regularizer[key] = val
+		if solver.r_collect_rhs_stat:
+			setattr(solver.rhs, 'statistics', stat)
+	return None
+
+
+def regularized_ode_solver(solver, alpha={}, p=0, quadrature='rectangle', collect_rhs_stat=_collect_rhs_stat):
+	alpha = alpha.copy()
+	# disable all regularizers by default
+	if 'div' not in alpha: alpha['div'] = 0.0
+	if 'jac' not in alpha: alpha['jac'] = 0.0
+	if 'f'   not in alpha: alpha['f']   = 0.0
+	if 'rad' not in alpha: alpha['rad'] = 0.0
+	if 'cnt' not in alpha: alpha['cnt'] = 0.0
+	if 'tv'  not in alpha: alpha['tv']  = 0.0
+
+	# temporal quadrature rule,
+	# contribution of divergence along the trajectory, and
+	# (t,y) quadrature_points
+	if quadrature=='trapezoidal':
+		qc = [((t+1)/(solver.num_steps+1))**p for t in range(solver.num_steps+1)]
+		# integrate = lambda fun: solver.h * (
+		# 	0.5 * ( qc[0] * fun(solver._t[0],solver._y[0]) + qc[-1] * fun(solver._t[-1],solver._y[-1]) )
+		# 	+ sum(c*fun(t,y) for c,t,y in zip(qc[1:-1],solver._t[1:-1],solver._y[1:-1]))
+		# 	)
+		integrate = lambda y: (0.5 * (qc[0]*y[0] + qc[-1]*y[-1]) + sum(ci*yi for ci,yi in zip(qc[1:-1],y[1:-1]))) / solver.num_steps
+		def quadrature_points():
+			return solver._t, solver._y
+	elif quadrature=='rectangle':
+		qc = [((t+1)/(solver.num_steps))**p for t in range(solver.num_steps)]
+		# # if theta==1, use left endpoint instead of right (same as step_fun in theta_solver)
+		# qt = (solver._t[i]+solver.theta*solver.h if solver.theta<1 else solver._t[i] for i in range(solver.num_steps))
+		# integrate = lambda fun: solver.h *
+		# 	sum( c*fun(t,y) for c,t,y in zip(
+		# 		qc,
+		# 		(solver._t[i]+solver.theta*solver.h if solver.theta<1 else solver._t[i] for i in range(solver.num_steps)),
+		# 		((1-solver.theta)*solver._y[i]+solver.theta*solver._y[i+1] for i in range(solver.num_steps))
+		# 		)
+		# 	)
+		# print(solver.h, 1/solver.num_steps)
+		# exit()
+		integrate = lambda y: sum(ci*yi for ci,yi in zip(qc,y)) / solver.num_steps
+		def quadrature_points():
+			# note that generator comprehensions ( ... for ... ) will not work
+			# when qt, qy need to be iterated multiple times, hence use lists
+			# if theta==1, use left endpoint instead of right (same as step_fun in theta_solver)
+			qt = [solver._t[i]+solver.theta*solver.h if solver.theta<1 else solver._t[i] for i in range(solver.num_steps)]
+			qy = [(1-solver.theta)*solver._y[i]+solver.theta*solver._y[i+1] for i in range(solver.num_steps)]
+			return qt, qy
+	else:
+		exit('unknown quadrature rule')
+
+	setattr(solver, 'r_integrate', integrate)
+	setattr(solver, 'r_quadrature_points', quadrature_points)
+	setattr(solver, 'r_alpha', alpha)
+	# setattr(solver, 'r_mciters', mciters)
+	# setattr(solver, 'p', p)
+	# setattr(solver, 'quadrature', quadrature)
+	setattr(solver, 'r_collect_rhs_stat', collect_rhs_stat)
+
 	solver.register_forward_hook(compute_regularizers_and_statistics)
 	return solver
