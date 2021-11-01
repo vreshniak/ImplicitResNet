@@ -4,6 +4,8 @@ logs
 out
 output
 MNIST
+FashionMNIST
+CIFAR10
 # *.pdf
 # *.eps
 .DS_Store
