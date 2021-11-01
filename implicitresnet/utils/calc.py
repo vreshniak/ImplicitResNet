@@ -60,6 +60,30 @@ def trace_and_jacobian(fun, input, create_graph=True, n=1):
 	return div/n/batch_dim, jac/n/batch_dim
 
 
+def jacobian_diag(fun, input, create_graph=True, n=1):
+	'''
+	Compute stochastic estimate of the Jacobian diagonal:
+	Bekas, C., Kokiopoulou, E., Saad, Y.: An estimator for the diagonal of a matrix. Appl. Numer. Math. 57(11), 1214–1229 (2007)
+	'''
+	with torch.enable_grad():
+		input  = input.detach().requires_grad_(True)
+		output = fun(input)
+
+		t = q = 0
+		for _ in range(n):
+			# v = torch.randn_like(output)
+			v = (torch.rand_like(output)<0.5)*2-1 # Rademacher
+			v_jac, = torch.autograd.grad(
+				outputs=output,
+				inputs=input,
+				grad_outputs=v,
+				create_graph=create_graph,  # need create_graph to find it's derivative
+				only_inputs=True)
+			t = t + v*v_jac
+			# q = q + v*v
+	return t #/ (q+1.e-12)
+
+
 
 
 def partial_trace(fun, input, create_graph=True, n=1, fraction=1.0):
