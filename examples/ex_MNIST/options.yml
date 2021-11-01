@@ -1,8 +1,7 @@
 seed: 10
 
-tol: 1.e-8
+tol: 1.e-6
 
-codim: 7
 depth: 2
 sigma: relu
 
@@ -10,12 +9,8 @@ piters: 1
 
 init: rnd
 lr: 1.e-2
-batch: 128
+batch: 100
 epochs: 200
-noisesize: 0
+#relaxation: 100
 
-aTV: 0.0
-adiv: 0.0
-ajac: 0.0
-af: 0.0
 mciters: 1
