@@ -60,6 +60,41 @@ def trace_and_jacobian(fun, input, create_graph=True, n=1):
 	return div/n/batch_dim, jac/n/batch_dim
 
 
+
+
+def partial_trace(fun, input, create_graph=True, n=1, fraction=1.0):
+	'''
+	Compute stochastic estimate of the Jacobian diagonal:
+	Bekas, C., Kokiopoulou, E., Saad, Y.: An estimator for the diagonal of a matrix. Appl. Numer. Math. 57(11), 1214–1229 (2007)
+	'''
+	with torch.enable_grad():
+		batch_dim = input.size(0)
+
+		input  = input.detach().requires_grad_(True)
+		output = fun(input)
+
+		t = 0
+		q = 0
+		for _ in range(n):
+			v = torch.randn_like(output)
+			v_jac, = torch.autograd.grad(
+				outputs=output,
+				inputs=input,
+				grad_outputs=v,
+				create_graph=create_graph,  # need create_graph to find it's derivative
+				only_inputs=True)
+			t = t + v*v_jac
+			q = q + v*v
+		diag = t / q
+		# print(q)
+		# div = t.sum()
+		t = t.reshape((batch_dim,-1))
+		numel = int(fraction * t.size(1))
+		div = t[:,:numel].sum()
+
+	return div/n/batch_dim, 0
+
+
 class TraceJacobianReg(torch.nn.Module):
 	def __init__(self, n=1):
 		super().__init__()
