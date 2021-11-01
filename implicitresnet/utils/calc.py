@@ -29,7 +29,7 @@ def directional_derivative(fun, input, direction, create_graph=True):
 
 
 
-def trace_and_jacobian(fun, input, create_graph=True, n=1):
+def trace_and_jacobian(fun, input, create_graph=True, n=1, min_eig=None):
 	'''
 	Compute trace and Frobenius norm of the Jacobian averaged over the batch dimension
 	'''
@@ -54,10 +54,24 @@ def trace_and_jacobian(fun, input, create_graph=True, n=1):
 				only_inputs=True)
 			vjacv = v*v_jac
 			if not hasattr(fun, 'trace'):
+				# if min_eig is not None:
+				# 	# w = torch.clamp(vjacv - min_eig, min=0.0).detach()
+				# 	# w = (w / torch.max(w)) #.pow(0.2)
+				# 	w = torch.heaviside(vjacv/(v*v+1.e-12)-min_eig,torch.tensor([0.0])).detach()
+				# 	# w = torch.nn.functional.leaky_relu( vjacv/(v*v) - min_eig, 0.5 ).detach()
+				# 	# w = torch.nn.functional.relu(vjacv/(v*v) - min_eig).detach()
+				# 	# w = (vjacv/(v*v+1.e-12) - min_eig).detach()
+				# 	# w = w / (torch.max(w.abs())+1.e-6)
+				# 	# w = torch.nn.functional.relu(w / (torch.max(w.abs())+1.e-6), inplace=True)**0.5
+				# 	div = div + (w*vjacv).sum()
+				# 	# div = div + (w*vjacv).sum()
+				# 	# div = div*(w.numel()/torch.count_nonzero(w))
+				# else:
+				# 	div = div + vjacv.sum()
 				div = div + vjacv.sum()
 			jac = jac + v_jac.pow(2).sum()
 
-	return div/n/batch_dim, jac/n/batch_dim
+	return div/n/batch_dim, jac/n/batch_dim #, torch.sum(w) #torch.sum(w)<0.8*w.numel()
 
 
 def jacobian_diag(fun, input, create_graph=True, n=1):
