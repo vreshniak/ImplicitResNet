@@ -44,7 +44,7 @@ def rotmat(a,b):
 	return c, s
 
 
-def gmres( A, x, b, max_iters=None, min_iters=3, max_restarts=1, tol=None, M=None ):
+def gmres( A, x, b, max_iters=None, min_iters=1, max_restarts=1, tol=None, M=None ):
 	"""
 	Adapted from http://www.netlib.org/templates/matlab/gmres.m
 
@@ -94,7 +94,7 @@ def gmres( A, x, b, max_iters=None, min_iters=3, max_restarts=1, tol=None, M=Non
 		r = M(b-A(x))
 		return x, r.norm(dim=1).amax(), 1, 0
 
-	if tol is None: tol = 1*torch.finfo(dtype).eps
+	if tol is None: tol = 10*torch.finfo(dtype).eps
 	tol = max(tol*b.norm(dim=1).amax(), tol)
 
 	# set max_iters if not given, and perform sanity checks
@@ -116,7 +116,9 @@ def gmres( A, x, b, max_iters=None, min_iters=3, max_restarts=1, tol=None, M=Non
 	bnrm2[bnrm2==0.0] = 1.0
 
 	# terminate if tolerance achieved
-	# r = M(b-A(x))
+	r = M(b-A(x))
+	error = r.norm(dim=1).amax()
+	if error<tol: return x, error, 1, 0
 	# error = r.norm(dim=1) / bnrm2
 	# error = r.norm(dim=1)
 	# if error.amax()<tol: return x, error.amax(), iters, flag
@@ -139,7 +141,7 @@ def gmres( A, x, b, max_iters=None, min_iters=3, max_restarts=1, tol=None, M=Non
 
 		r = M(b-A(x))
 		rnrm2 = r.norm(dim=1,keepdim=True)
-		rnrm2[rnrm2==0.0] = 1.0
+		rnrm2[rnrm2==0.0] = 1.e-12
 
 		# first basis vector
 		Q[...,0] = r / rnrm2
