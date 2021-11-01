@@ -20,7 +20,7 @@ from torch.nn.functional import normalize
 from typing import Any, Optional, TypeVar
 from torch.nn import Module
 
-from .calc import jacobian
+from .calc import jacobian, hessian
 
 
 class SpectralNorm:
@@ -351,7 +351,7 @@ def remove_spectral_norm(module: T_module, name: str = 'weight') -> T_module:
 ###############################################################################
 
 
-def eigenvalues(fun, x):
+def eigenvalues(fun, x, type='jacobian', return_matrix=False):
     import numpy as np
     x = x.detach().requires_grad_(True)
 
@@ -377,8 +377,12 @@ def eigenvalues(fun, x):
             batch_dim = x.size(0)
             data_dim  = x.numel() // batch_dim
             y = 1*fun[j](x) # in case fun is just x
-            if y.shape==x.shape:
-                jac = jacobian( y, x, True ).reshape( batch_dim, data_dim, batch_dim, data_dim ).cpu().detach().numpy()
+            if y.shape==x.shape or type=='hessian':
+                if type=='jacobian':
+                    jac = jacobian( y, x, True )
+                elif type=='hessian':
+                    jac = hessian( y, x, True )
+                jac = jac.reshape( batch_dim, data_dim, batch_dim, data_dim ).cpu().detach().numpy()
                 eig = np.linalg.eigvals([ jac[i,:,i,:] for i in range(batch_dim) ]).reshape((-1,1))
                 eigvals.append( np.hstack(( np.real(eig), np.imag(eig) )) )
             else:
@@ -388,13 +392,20 @@ def eigenvalues(fun, x):
         batch_dim = x.size(0)
         data_dim  = x.numel() // batch_dim
         y = 1*fun(x) # in case fun is just x
-        if y.shape==x.shape:
-            jac = jacobian( y, x, True ).reshape( batch_dim, data_dim, batch_dim, data_dim ).cpu().detach().numpy()
+        if y.shape==x.shape or type=='hessian':
+            if type=='jacobian':
+                jac = jacobian( y, x, True )
+            elif type=='hessian':
+                jac = hessian( y, x, True )
+            jac = jac.reshape( batch_dim, data_dim, batch_dim, data_dim ).cpu().detach().numpy()
             eig = np.linalg.eigvals([ jac[i,:,i,:] for i in range(batch_dim) ]).reshape((-1,1))
             eigvals = np.hstack(( np.real(eig), np.imag(eig) ))
         else:
             eigvals = None
-    return eigvals
+    if return_matrix:
+        return eigvals, jac
+    else:
+        return eigvals
 
 
 
