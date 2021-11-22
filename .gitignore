@@ -6,6 +6,8 @@ output
 MNIST
 FashionMNIST
 CIFAR10
+CIFAR10_500
+MNIST_500
 # *.pdf
 # *.eps
 .DS_Store

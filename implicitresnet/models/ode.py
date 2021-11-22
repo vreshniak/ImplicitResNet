@@ -597,7 +597,7 @@ def compute_regularizers_and_statistics(solver, input, output):
 			center, radius   = solver.rhs.center,  solver.rhs.radius
 			stabmin, stabmax = solver.rhs.stabmin, solver.rhs.stabmax
 			regcenter = center if stabmin is None else stabmin
-			regradius = radius if stabmin is None else torch.nn.functional.relu(stabmax-stabmin)
+			regradius = radius if stabmin is None or stabmax is None else torch.maximum(torch.tensor(0.1).to(int_div.device),stabmax-stabmin.detach())
 			# stabcenter, radius = solver.rhs.get_spectral_circle(stability_circle=True)
 
 		#######################################################################
@@ -622,9 +622,8 @@ def compute_regularizers_and_statistics(solver, input, output):
 			stat['rhs/'+name+'div'] = int_div
 			stat['rhs/'+name+'cnt'] = center
 			stat['rhs/'+name+'rad'] = radius
-			if stabmin is not None:
-				stat['rhs/'+name+'stabmin'] = stabmin
-				stat['rhs/'+name+'stabmax'] = stabmax
+			if stabmin is not None: stat['rhs/'+name+'stabmin'] = stabmin
+			if stabmax is not None: stat['rhs/'+name+'stabmax'] = stabmax
 
 
 
