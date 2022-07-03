@@ -8,6 +8,7 @@ FashionMNIST
 CIFAR10
 CIFAR10_500
 MNIST_500
+coresets
 # *.pdf
 # *.eps
 .DS_Store
