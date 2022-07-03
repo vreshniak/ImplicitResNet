@@ -12,7 +12,7 @@ Changes:
 
 import torch
 # from torch.nn.functional import normalize
-from typing import Any, Optional, TypeVar
+from typing import Any, Optional, Union, TypeVar
 from torch.nn import Module
 
 from .calc import jacobian, hessian
@@ -124,7 +124,7 @@ class SpectralNorm:
 			raise TypeError(f"`spectral_norm` is not implemented for the module {module}")
 
 	@staticmethod
-	def apply(module: Module, name: str, n_power_iterations: int, eps: float, sigma: int|float|list) -> 'SpectralNorm':
+	def apply(module: Module, name: str, n_power_iterations: int, eps: float, sigma: Union[int,float,list]) -> 'SpectralNorm':
 		for k, hook in module._forward_pre_hooks.items():
 			if isinstance(hook, SpectralNorm) and hook.name == name:
 				raise RuntimeError(f"Cannot register two spectral_norm hooks on the same parameter {name}")
@@ -203,7 +203,7 @@ def spectral_norm(module: T_module,
 				  name: str = 'weight',
 				  n_power_iterations: int = 1,
 				  eps: float = 1e-12,
-				  sigma: int|float|list = 1.0) -> T_module:
+				  sigma: Union[int,float,list] = 1.0) -> T_module:
 	r"""Applies spectral normalization to a parameter in the given module.
 
 	Spectral normalization rescales the weight tensor with spectral norm of the weight matrix calculated using
