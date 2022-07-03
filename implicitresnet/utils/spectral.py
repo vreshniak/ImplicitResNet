@@ -66,28 +66,33 @@ class SpectralNorm:
 		weight      = getattr(module, self.name + '_orig')
 		v           = getattr(module, self.name + '_v')
 		sigma_range = getattr(module, self.name + '_sigma_range')
-		sigma_var   = getattr(module, self.name + '_sigma_var')
+		sigma_param = getattr(module, self.name + '_sigma_param')
 
-		# compute singular vector
-		if do_power_iteration:
-			with torch.no_grad():
-				for _ in range(self.n_power_iterations):
-					# Spectral norm of weight equals to `||W v||`, where `v` is the largest singular vector.
-					# This power iteration produces approximation of `v` as (W^t W v) / ||W^t W v||.
-					with torch.enable_grad():
-						v.requires_grad_(True)
-						Wv = self.weight_fn(module, weight, v)
-						Wv = 0.5 * torch.autograd.grad(Wv.pow(2).sum(), v, create_graph=False, retain_graph=False, only_inputs=True)[0].detach()
-					v = torch.div(Wv, Wv.flatten().norm()+self.eps, out=v)
-				if self.n_power_iterations > 0:
-					# See above on why we need to clone
-					v = v.clone(memory_format=torch.contiguous_format)
+		# spectral norm rescaling
+		sigma_val = sigma_range[0] if sigma_range[-1]==sigma_range[0] else sigma_range[0] + torch.sigmoid(sigma_param) * ( sigma_range[-1] - sigma_range[0] )
 
-		# compute spectral norm (singular value) as ||W v||
-		sigma = self.weight_fn(module, weight, v).flatten().norm()
-		# rescale spectral norm
-		sigma_val = sigma_range[0] if sigma_range[-1]==sigma_range[0] else sigma_range[0] + torch.sigmoid(sigma_var) * ( sigma_range[-1] - sigma_range[0] )
-		return weight * (sigma_val/sigma)
+		if isinstance(module, torch.nn.modules.batchnorm._BatchNorm):
+			scale = sigma_val * module.running_var
+			weight.data = weight.data.clamp(min=-scale, max=scale)
+			return weight
+		elif isinstance(module, torch.nn.Linear) or isinstance(module, torch.nn.modules.conv._ConvNd):
+			# compute singular vector
+			if do_power_iteration:
+				with torch.no_grad():
+					for _ in range(self.n_power_iterations):
+						# Spectral norm of weight equals to `||W v||`, where `v` is the largest singular vector.
+						# This power iteration produces approximation of `v` as (W^t W v) / ||W^t W v||.
+						with torch.enable_grad():
+							v.requires_grad_(True)
+							Wv = self.weight_fn(module, weight, v)
+							Wv = 0.5 * torch.autograd.grad(Wv.pow(2).sum(), v, create_graph=False, retain_graph=False, only_inputs=True)[0].detach()
+						v = torch.div(Wv, Wv.flatten().norm()+self.eps, out=v)
+					if self.n_power_iterations > 0:
+						# See above on why we need to clone
+						v = v.clone(memory_format=torch.contiguous_format)
+			# compute spectral norm (singular value) as ||W v||
+			sigma = self.weight_fn(module, weight, v).flatten().norm()
+			return weight * (sigma_val/sigma)
 
 	def remove(self, module: Module) -> None:
 		with torch.no_grad():
@@ -96,19 +101,24 @@ class SpectralNorm:
 		delattr(module, self.name + '_orig')
 		delattr(module, self.name + '_v')
 		delattr(module, self.name + '_sigma_range')
-		delattr(module, self.name + '_sigma_var')
+		delattr(module, self.name + '_sigma_param')
 		module.register_parameter(self.name, torch.nn.Parameter(weight.detach()))
 
 	def __call__(self, module: Module, inputs: Any) -> None:
-		# infer the input shape to create the buffer `v` for the singular vector if it doesn't exist
-		with torch.no_grad():
-			if getattr(module, self.name+'_v') is None:
-				delattr(module, self.name+'_v')
-				v = module.weight.new_empty(inputs[0].numel()//inputs[0].size(0)).normal_(0, 1)
-				v = F.normalize(v, dim=0, eps=self.eps).reshape(1,*inputs[0].shape[1:])
-				module.register_buffer(self.name+"_v", v)
-		# normalize weight
-		setattr(module, self.name, self.compute_weight(module, do_power_iteration=module.training))
+		if isinstance(module, torch.nn.modules.batchnorm._BatchNorm):
+			setattr(module, self.name, self.compute_weight(module, do_power_iteration=False))
+		elif isinstance(module, torch.nn.Linear) or isinstance(module, torch.nn.modules.conv._ConvNd):
+			# infer the input shape to create the buffer `v` for the singular vector if it doesn't exist
+			with torch.no_grad():
+				if getattr(module, self.name+'_v') is None:
+					delattr(module, self.name+'_v')
+					v = module.weight.new_empty(inputs[0].numel()//inputs[0].size(0)).normal_(0, 1)
+					v = F.normalize(v, dim=0, eps=self.eps).reshape(1,*inputs[0].shape[1:])
+					module.register_buffer(self.name+"_v", v)
+			# normalize weight
+			setattr(module, self.name, self.compute_weight(module, do_power_iteration=module.training))
+		else:
+			raise TypeError(f"`spectral_norm` is not implemented for the module {module}")
 
 	def weight_fn(self, module, weight, v):
 		# weight function to use in compute_weight
@@ -120,8 +130,6 @@ class SpectralNorm:
 			return F.conv2d(v, weight, bias=None, stride=module.stride, padding=module.padding, dilation=module.dilation, groups=module.groups)
 		elif isinstance(module, torch.nn.Conv3d):
 			return F.conv3d(v, weight, bias=None, stride=module.stride, padding=module.padding, dilation=module.dilation, groups=module.groups)
-		else:
-			raise TypeError(f"`spectral_norm` is not implemented for the module {module}")
 
 	@staticmethod
 	def apply(module: Module, name: str, n_power_iterations: int, eps: float, sigma: Union[int,float,list]) -> 'SpectralNorm':
@@ -154,7 +162,7 @@ class SpectralNorm:
 		# register parameters and buffers to handle learnable spectral norm
 		ini_sigma   = torch.tensor( (sigma_range[1]-sigma_range[0]) / (sigma_range[2]-sigma_range[0]+1.e-8) + 0.01 )
 		inv_sigmoid = torch.log(ini_sigma/(1-ini_sigma))
-		module.register_parameter(fn.name + "_sigma_var", torch.nn.parameter.Parameter( inv_sigmoid, requires_grad=(sigma_range[-1]!=sigma_range[0])))
+		module.register_parameter(fn.name + "_sigma_param", torch.nn.parameter.Parameter( inv_sigmoid, requires_grad=(sigma_range[-1]!=sigma_range[0])))
 		module.register_buffer(fn.name + "_sigma_range", torch.tensor(sigma_range))
 
 		delattr(module, fn.name)
