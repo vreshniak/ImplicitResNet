@@ -16,16 +16,24 @@ from ..utils import spectral_norm
 
 def choose_activation(activation):
 	if isinstance(activation,str):
-		if activation=='relu':
+		if activation=='linear':
+			return torch.nn.Identity()
+		elif activation=='relu':
 			return torch.nn.ReLU()
+		elif activation=='silu':
+			return torch.nn.SiLU()
 		elif activation=='elu':
 			return torch.nn.ELU()
+		elif activation=='leakyrelu':
+			return torch.nn.LeakyReLU()
 		elif activation=='gelu':
 			return torch.nn.GELU()
 		elif activation=='celu':
 			return torch.nn.CELU()
 		elif activation=='tanh':
 			return torch.nn.Tanh()
+		elif activation=='sigmoid':
+			return torch.nn.Sigmoid()
 		elif activation=='tanhshrink':
 			return torch.nn.Tanhshrink()
 		elif activation=='softsign':
