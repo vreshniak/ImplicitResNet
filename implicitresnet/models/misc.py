@@ -1,8 +1,10 @@
 import time
 import math
 
+from typing import Union
+
 import torch
-from torch.nn import Linear, ReLU, Conv2d, Module, Sequential, Parameter
+from torch.nn import Linear, ReLU, Conv2d, Module, Sequential, Parameter, ModuleList, BatchNorm1d
 from torch.nn.functional import linear
 
 from ..utils import spectral_norm
@@ -43,33 +45,56 @@ def choose_activation(activation):
 
 
 ###############################################################################################
+# Perceptrons
 
+class MLP(Sequential):
+	def __init__(self, in_dim: int, out_dim: int, width: Union[int,list], depth: int,
+		activation: Union[str,list] = 'relu', bias: Union[bool,list] = True, spectral_norm=False, batch_norm=False, power_iters=1) -> None:
+		r""" Multilayer perceptron implemented on top of torch.nn.Sequential.
+		The `depth` is the number of hidden layers, i.e., shallow network has depth 0 and the total number of layers is `depth+2`.
+		If `batch_norm` is True, it is applied to all but last layer.
+		If `spectral_norm` is True, it is applied to all layers including batch normalization layers.
+		"""
 
-class MLP(Module):
-	def __init__(self, in_dim, out_dim, width, depth, activation='relu', final_activation=None, power_iters=0):
-		super().__init__()
+		# activation functions of the hidden layers
+		if isinstance(activation,str):
+			sigma = [choose_activation(activation)]*(depth+1)
+		elif len(activation)!=(depth+1):
+			raise ValueError(f"`activation' must have length depth+1={depth+1}, got {activation}")
 
-		# activation function of hidden layers and last layer
-		sigma1 = choose_activation(activation)
-		sigma2 = choose_activation(final_activation) if final_activation is not None else sigma1
+		# widths of the hidden layers
+		if isinstance(width,int):
+			width = [width]*(depth+1)
+		elif len(width)!=(depth+1):
+			raise ValueError(f"`width' must have length depth+1={depth+1}, got {width}")
+
+		# widths of the hidden layers
+		if isinstance(bias,bool):
+			bias = [bias]*(depth+2)
+		elif len(bias)!=(depth+1):
+			raise ValueError(f"`bias' must have length depth+2={depth+2}, got {bias}")
+
+		# batch normalization layers
+		if batch_norm:
+			bias  = [False]*(depth+1) + [bias[-1]]
+			bnorm = [ BatchNorm1d(in_dim) ] + [ BatchNorm1d(width[d]) for d in range(depth) ]
 
 		# linear layers
-		linear_inp =   Linear(in_dim, width,   bias=True)
-		linear_hid = [ Linear(width,  width,   bias=True) for _ in range(depth) ]
-		linear_out =   Linear(width,  out_dim, bias=False)
+		linear = [Linear(in_dim, width[0], bias=bias[0])] + [Linear(width[d], width[d+1], bias=bias[d+1]) for d in range(depth)] + [Linear(width[depth], out_dim, bias=bias[depth+1])]
 
 		# spectral normalization
-		if power_iters>0:
-			linear_inp =   spectral_norm( linear_inp, name='weight', input_shape=(in_dim,), n_power_iterations=power_iters, eps=1e-12, dim=None)
-			linear_hid = [ spectral_norm( linear,     name='weight', input_shape=(width,),  n_power_iterations=power_iters, eps=1e-12, dim=None) for linear in linear_hid ]
-			linear_out =   spectral_norm( linear_out, name='weight', input_shape=(width,),  n_power_iterations=power_iters, eps=1e-12, dim=None)
+		if spectral_norm:
+			linear = [spectral_norm(l, n_power_iterations=power_iters) for l in linear]
+			if batch_norm:
+				bnorm = [spectral_norm(b, n_power_iterations=power_iters) for b in bnorm]
 
-		# Multilayer perceptron
-		net = [linear_inp] + [val for pair in zip([sigma1]*depth,linear_hid) for val in pair] + [sigma2,linear_out]
-		self.net = Sequential(*net)
+		# batch normalization
+		if batch_norm:
+			net = [bnorm[0],linear[0]] + [val for triple in zip(sigma[:-1],bnorm[1:],linear[1:-1]) for val in triple] + [sigma[-1],linear[-1]]
+		else:
+			net = [linear[0]] + [val for pair in zip(sigma,linear[1:]) for val in pair]
 
-	def forward(self, x):
-		return self.net(x)
+		super().__init__(*net)
 
 
 class HollowMLP(Module):
