@@ -3,6 +3,8 @@ import math
 
 from pathlib import Path
 
+from tqdm import tqdm, trange
+
 import torch
 from torch.utils.tensorboard import SummaryWriter
 
