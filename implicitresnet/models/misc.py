@@ -42,6 +42,8 @@ def choose_activation(activation):
 			return torch.nn.Tanhshrink()
 		elif activation=='softsign':
 			return torch.nn.Softsign()
+		else:
+			raise ValueError(f"{activation} is wrong activation, should be one of {'linear','relu','silu','elu','leakyrelu','gelu','celu','tanh','sigmoid','tahnshrink','softsign'}")
 	elif isinstance(activation,Module):
 		return activation
 
