@@ -13,7 +13,11 @@ from torch.utils.tensorboard import SummaryWriter
 
 
 def as_sum_and_dict(value):
-	val   = 0
+	'''
+	* convert value to dictionary
+	* return dict and its sum
+	'''
+	val   = torch.tensor(0)
 	items = {}
 	if value is not None:
 		if isinstance(value, list):
