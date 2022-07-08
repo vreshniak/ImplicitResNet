@@ -86,16 +86,7 @@ class _BatchNorm(Module):
 			self.register_parameter("bias", None)
 
 		self.register_buffer('running_mean', torch.zeros(num_features, **factory_kwargs))
-		# if self.track_mean:
-		# 	self.register_buffer('running_mean', torch.zeros(num_features, **factory_kwargs))
-		# else:
-		# 	self.register_buffer("running_mean", None)
-
-		self.register_buffer('running_var', torch.ones(num_features, **factory_kwargs))
-		# if self.track_variance:
-		# 	self.register_buffer('running_var', torch.ones(num_features, **factory_kwargs))
-		# else:
-		# 	self.register_buffer("running_var", None)
+		self.register_buffer('running_var',  torch.ones(num_features,  **factory_kwargs))
 
 		if self.track_mean or self.track_variance:
 			self.register_buffer('num_batches_tracked', torch.tensor(0, dtype=torch.long, **{k: v for k, v in factory_kwargs.items() if k != 'dtype'}))
