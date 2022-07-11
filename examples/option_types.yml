@@ -1,0 +1,71 @@
+####################
+results_path: str
+prefix: str
+model: str
+runname: str
+mode: str
+seed: int
+runs: int
+####################
+# resnet params
+theta: float
+tol: float
+T: float
+steps: int
+####################
+# rhs params
+codim: int
+width: int
+depth: int
+sigma: str
+####################
+# rhs spectral properties
+rhs_mode: str
+piters: int
+center: float
+radius: float
+stabmin: float
+stabmax: float
+# eigspread: float
+# eigcenter: float
+# eigradius: float
+# stabspread: float
+# stabcenter: float
+# stabval: float
+# stabzero: bool
+# dissipative: bool
+# learn_limits: bool
+# learn_circle: bool
+####################
+# data params
+dataset: str
+datasize: int
+datasteps: int
+datanoise: str
+noisesize: float
+####################
+# training params
+batch: int
+pre_epochs: int
+post_epochs: int
+epochs: int
+#relaxation: int
+init: str
+lr: float
+####################
+# regularizers
+a_wdecay: float
+a_tv: float
+a_jac: float
+a_f: float
+a_df: float
+a_div: float
+a_rad: float
+a_cnt: float
+a_lip: float
+a_stabdiv: float
+a_stabrad: float
+a_stabcnt: float
+# adaugm: float
+# aperturb: float
+mciters: int
