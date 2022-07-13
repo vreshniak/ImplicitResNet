@@ -1034,15 +1034,7 @@ def lbfgs( fun, x0, tol=None, max_iters=_max_iters, min_iters=_min_iters, histor
 
 
 
-def adam( fun, x0, tol=None, max_iters=_max_iters, min_iters=_min_iters, batch_error='max' ):
-	error = 0
-	flag  = 0
-
-	if batch_error=='max':
-		batch_err = lambda z: z.amax()
-	elif batch_error=='mean':
-		batch_err = lambda z: z.mean()
-
+def adam( fun, x0, tol=None, tolerance_grad=None, max_iters=_max_iters, min_iters=_min_iters, lr=1.0 ):
 	dtype  = x0.dtype
 	device = x0.device
 
@@ -1050,27 +1042,32 @@ def adam( fun, x0, tol=None, max_iters=_max_iters, min_iters=_min_iters, batch_e
 
 	# check initial residual
 	with torch.no_grad():
-		error = batch_err(fun(x0))
-		if error<tol: return x0.detach(), error.detach(), 0, flag
+		error = fun(x0).max()
+		if error<tol:
+			return x0.detach(), error.detach(), 0, 0, 0
 
 	# initial condition: make new (that's why clone) leaf (that's why detach) node which requires gradient
 	x = x0.clone().detach().requires_grad_(True)
-	nsolver = torch.optim.Adam([x], lr=1.e0)
-	for iters in range(max_iters+1):
-		resid = fun(x)
-		error = batch_err(resid)
-		if iters>=min_iters and error<=tol:
-			break
-		residual = resid.mean()
+	nsolver = torch.optim.Adam([x], lr=lr)
+	for niters in range(1,max_iters+1):
 		nsolver.zero_grad()
-		x.grad, = torch.autograd.grad(residual, x, only_inputs=True, allow_unused=False)
+		residual = fun(x)
+		# use .grad() instead of .backward() to avoid evaluation of gradients for leaf parameters which must be frozen inside nsolver
+		x.grad, = torch.autograd.grad(residual.sum(), x, only_inputs=True, allow_unused=False)
+		error = residual.max()
 		nsolver.step()
+
+		if niters>=min_iters:
+			if error<=tol:
+				break
+			if tolerance_grad is not None and x.grad.flatten().abs().max()<=tolerance_grad:
+				break
 
 	# if error>tol:
 	# 	x, error, iters2, flag = lbfgs(fun, x, tol=tol, max_iters=max_iters, min_iters=min_iters, batch_error=batch_error)
-	if error>tol: flag=1
+	flag = int(error>tol)
 
-	return x.detach(), error.detach(), iters, flag
+	return x.detach(), error, niters, niters, flag
 
 
 
