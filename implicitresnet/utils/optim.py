@@ -74,7 +74,7 @@ class TrainingLoop:
 
 		if checkpoints is not None:
 			assert isinstance(checkpoints, dict), "checkpoints must be dictionary"
-			assert ('dir' in checkpoints.keys()), "checkpoints must have 'dir' keys"
+			assert ('dir' in checkpoints.keys()), "checkpoints must have 'dir' key"
 			if not 'name' in checkpoints.keys(): checkpoints['name'] = 'chkp'
 			Path(checkpoints['dir'],"best_loss").mkdir(parents=True, exist_ok=True)
 			Path(checkpoints['dir'],"best_val_loss").mkdir(parents=True, exist_ok=True)
