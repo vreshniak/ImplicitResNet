@@ -989,7 +989,7 @@ def lbfgs( fun, x0, tol=None, max_iters=_max_iters, min_iters=_min_iters, histor
 	with torch.no_grad():
 		error = fun(x0).max()
 		if error<tol:
-			return x0.detach(), error.detach(), 0, 0
+			return x0.detach(), error.detach(), 0, 0, 0
 
 	# initial condition: make new (that's why clone) leaf (that's why detach) node which requires gradient
 	x = x0.clone().detach().requires_grad_(True)
