@@ -487,6 +487,18 @@ class rhs_base(torch.nn.Module, metaclass=ABCMeta):
 ###############################################################################
 ###############################################################################
 
+def addprop(inst, name, method):
+	r'''Add property to existing instance of a class
+	https://stackoverflow.com/questions/2954331/dynamically-adding-property-in-python
+	'''
+	cls = type(inst)
+	if not hasattr(cls, '__perinstance'):
+		cls = type(cls.__name__, (cls,), {})
+		cls.__perinstance = True
+		inst.__class__ = cls
+	setattr(cls, name, property(method))
+
+
 def to_range(input: Union[_TNum, List[_TNum]]) -> List[_TNum]:
 	if isinstance(input, list):
 		if len(input)<1 or len(input)>3:
