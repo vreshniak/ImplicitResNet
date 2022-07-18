@@ -1,10 +1,12 @@
 from abc import ABCMeta, abstractmethod
+from typing import Union, List
 
 import math
 
 import torch
 from .misc import ParabolicPerceptron, HamiltonianPerceptron, HollowMLP, MLP, PreActConv2d
 
+_TNum = Union[int, float]
 
 
 ###############################################################################
@@ -485,6 +487,18 @@ class rhs_base(torch.nn.Module, metaclass=ABCMeta):
 ###############################################################################
 ###############################################################################
 
+def to_range(input: Union[_TNum, List[_TNum]]) -> List[_TNum]:
+	if isinstance(input, list):
+		if len(input)<1 or len(input)>3:
+			raise ValueError(f"length of input list should be 1, 2 or 3, got {str(input)}")
+		if len(input)==1:
+			return 3*input
+		elif len(input)==2:
+			return [input[0],input[0],input[1]]
+		else:
+			return input
+	else:
+		return 3*[input]
 
 
 class rhs_mlp(rhs_base):
