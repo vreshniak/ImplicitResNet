@@ -1,11 +1,16 @@
 from abc import ABCMeta, abstractmethod
 from typing import Union, List
+from types import MethodType
 from copy import deepcopy
 
 import math
 
 import torch
+import torch.nn.functional as F
 from .misc import ParabolicPerceptron, HamiltonianPerceptron, HollowMLP, MLP, PreActConv2d
+from ..utils.spectral import spectral_norm
+
+
 
 _TNum = Union[int, float]
 
@@ -512,6 +517,114 @@ def to_range(input: Union[_TNum, List[_TNum]]) -> List[_TNum]:
 			return input
 	else:
 		return 3*[input]
+
+
+def restrict_theta_stability(rhs, theta, stability_center, lipschitz_constant, min_eig=-20., max_eig=20., power_iters=1, sigscale=2.0):
+	stabcenter_range = to_range(stability_center)
+	lipschitz_range  = to_range(lipschitz_constant)
+
+	#######################################################################
+	# horizontal asymptote of the stability function separating two branches
+	# we need to remain on the upper branch
+	branch_switch_asymptote = torch.tensor(1.0 - 1.0/(theta+1.e-12) + 1.e-6, dtype=torch.float)
+	def inverse_theta_stability_fun(y):
+		# restrict to correct branch
+		if y<=0: y = torch.maximum(y, branch_switch_asymptote)
+		# restrict range of spectrum
+		eigenvalue = torch.clamp((1-y)/((1-y)*theta-1), min=min_eig, max=max_eig)
+		return eigenvalue
+
+	#######################################################################
+	# initialize weights
+	for name, param in rhs.named_parameters():
+		if isinstance(param, torch.nn.parameter.UninitializedParameter):
+			if 'weight' in name and param.dim()>1:
+				torch.nn.init.xavier_uniform_(param)
+				# torch.nn.init.xavier_normal_(param, gain=1.e-1)
+				# torch.nn.init.xavier_uniform_(param, gain=1./param.detach().norm())
+				# torch.nn.init.uniform_(param,-1.e-3,1.e-3)
+				# torch.nn.init.uniform_(param,-1.,1.)
+			elif 'bias' in name:
+				torch.nn.init.zeros_(param)
+
+	#######################################################################
+	# new parameters for center and radius (note that not all parameters might be used)
+	# initialize params so that sigmoid(param) = ini_sigmoid
+	ini_lip = (lipschitz_range[1]-lipschitz_range[0])   / (lipschitz_range[2]-lipschitz_range[0]+1.e-8)   + 0.0010
+	ini_cnt = (stabcenter_range[1]-stabcenter_range[0]) / (stabcenter_range[2]-stabcenter_range[0]+1.e-8) + 0.0011
+	inv_sigmoid = lambda ini_sigmoid: math.log(ini_sigmoid/(1-ini_sigmoid)) / sigscale
+	#
+	rhs.register_parameter('cnt_var', torch.nn.parameter.Parameter( torch.tensor(inv_sigmoid(ini_cnt)), requires_grad=(stabcenter_range[-1]!=stabcenter_range[0])))
+	rhs.register_parameter('lip_var', torch.nn.parameter.Parameter( torch.tensor(inv_sigmoid(ini_lip)), requires_grad=(lipschitz_range[-1]!=lipschitz_range[0])))
+
+	# add utility functions
+	def freeze_spectral_circle(self):
+		self.cnt_var.requires_grad_(False)
+		self.lip_var.requires_grad_(False)
+	def unfreeze_spectral_circle(self):
+		self.cnt_var.requires_grad_(True)
+		self.lip_var.requires_grad_(True)
+	def get_spectral_circle(self):
+		return self.center, self.radius
+	rhs.freeze_spectral_circle   = MethodType(freeze_spectral_circle,   rhs)
+	rhs.unfreeze_spectral_circle = MethodType(unfreeze_spectral_circle, rhs)
+	rhs.get_spectral_circle      = MethodType(get_spectral_circle,      rhs)
+
+	#######################################################################
+	# dynamically add properties to the object of "per-instance class"
+	def stability_center(self):
+		return stabcenter_range[0] + torch.sigmoid(sigscale*self.cnt_var) * ( stabcenter_range[-1] - stabcenter_range[0] )
+
+	def lipschitz_constant(self):
+		return lipschitz_range[0]  + torch.sigmoid(sigscale*self.lip_var) * ( lipschitz_range[-1]  - lipschitz_range[0]  )
+
+	def stability_radius(self):
+		return F.relu(self.lipschitz_constant-self.stability_center)
+		# return F.relu(self.lipschitz_constant-self.stability_center.detach())
+
+	def center(self):
+		return inverse_theta_stability_fun(self.stability_center)
+
+	def radius(self):
+		eig_lipschitz = inverse_theta_stability_fun(self.lipschitz_constant)
+		eig_center    = inverse_theta_stability_fun(self.stability_center)
+		eig_radius    = F.relu(eig_lipschitz-eig_center)
+		#eig_radius    = F.relu(eig_lipschitz-eig_center.detach())
+		#eig_radius    = F.softplus(eig_lipschitz-eig_center,beta=20)
+		return eig_radius
+
+	addprop(rhs, 'center', center)
+	addprop(rhs, 'radius', radius)
+	addprop(rhs, 'stability_center', stability_center)
+	addprop(rhs, 'stability_radius', stability_radius)
+	addprop(rhs, 'lipschitz_constant', lipschitz_constant)
+
+	#######################################################################
+	# perform spectral normalization for linear layers
+
+	for f in rhs.modules():
+		if isinstance(f, torch.nn.modules.conv._ConvNd) or isinstance(f, torch.nn.Linear) or isinstance(f, torch.nn.modules.batchnorm._BatchNorm):
+			spectral_norm(f, name='weight', n_power_iterations=power_iters)
+			# # perform dummy initial spectral normalization
+			# x = torch.ones(1,*input_shape)
+			# for _ in range(5):
+			# 	rhs(x)
+
+	#######################################################################
+	# register forward hooks
+
+	def theta_stability_restriction_hook(m, input, output):
+		eig_lipsch = inverse_theta_stability_fun(m.lipschitz_constant)
+		eig_center = inverse_theta_stability_fun(m.stability_center)
+		eig_radius = F.relu(eig_lipsch-eig_center)
+		# eig_radius = F.relu(eig_lipsch-eig_center.detach())
+		# eig_radius = F.softplus(eig_lipsch-eig_center,beta=20)
+		return eig_center * input[0] + eig_radius * output
+
+	rhs.register_forward_hook(theta_stability_restriction_hook)
+
+	return rhs
+
 
 
 ###############################################################################
