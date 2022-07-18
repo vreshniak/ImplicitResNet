@@ -1,5 +1,6 @@
 from abc import ABCMeta, abstractmethod
 from typing import Union, List
+from copy import deepcopy
 
 import math
 
@@ -511,6 +512,41 @@ def to_range(input: Union[_TNum, List[_TNum]]) -> List[_TNum]:
 			return input
 	else:
 		return 3*[input]
+
+
+###############################################################################
+###############################################################################
+
+
+def make_rhs(model, T=1, num_steps=1):
+	return rhs(model, T, num_steps)
+
+class rhs(torch.nn.ModuleList):
+	def __init__(self, model, T=1, num_steps=1):
+		super().__init__(modules=[deepcopy(model) for _ in range(num_steps)])
+		self.h = T / num_steps
+
+	def t2ind(self, t):
+		if torch.is_tensor(t):
+			assert t.ndim<2, "t must be either a scalar or a vector"
+			return torch.clamp( (t/self.h).int(), max=len(self)-1 )
+		else:
+			return min(int(t/self.h), len(self)-1)
+
+	def forward(self, t, y):
+		ind = self.t2ind(t)
+		if torch.is_tensor(ind) and ind.ndim>0:
+			assert ind.size(0)==y.size(0), "if t is tensor, it must have the same batch dimension as y"
+			# need to sacrifice full batch parallelization here
+			f = [ self[i](y[batch,...]) for batch, i in enumerate(ind) ]
+			f = torch.stack(f)
+			# this doesn't work. why?
+			# f = [ self.F[i](y[i==ind,...]) for i in torch.unique(ind) ]
+			# f = torch.cat(f,0)
+		else:
+			f = self[ind](y)
+
+		return f
 
 
 class rhs_mlp(rhs_base):
