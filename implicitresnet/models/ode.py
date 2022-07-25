@@ -217,6 +217,14 @@ class ode_solver(torch.nn.Module, metaclass=ABCMeta):
 	def ode_step(self, t0, x, param=None):
 		pass
 
+	@abstractmethod
+	def stability_function(self, z):
+		pass
+
+	@abstractmethod
+	def inv_stability_function(self, z):
+		pass
+
 	########################################
 
 
@@ -318,6 +326,19 @@ class theta_solver(ode_solver):
 		return stat
 
 	########################################
+
+	def stability_function(self, z):
+		return (1+(1-self.theta)*z) / (1-self.theta*z)
+
+
+	def inv_stability_function(self, z, min_eig=-20, max_eig=20):
+		# horizontal asymptote of the stability function separating two branches; we need to remain on the upper branch
+		branch_switch_asymptote = torch.tensor(1.0 - 1.0/(self.theta+1.e-12) + 1.e-6, dtype=torch.float)
+		# restrict to correct branch
+		if z<=0: z = torch.maximum(z, branch_switch_asymptote)
+		# restrict range of spectrum
+		eigenvalue = torch.clamp((1-z)/((1-z)*self.theta-1), min=min_eig, max=max_eig)
+		return eigenvalue
 
 
 	def step_fun(self, t, x, y):
