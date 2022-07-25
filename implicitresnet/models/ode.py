@@ -273,8 +273,31 @@ class ode_solver(torch.nn.Module, metaclass=ABCMeta):
 
 
 class theta_solver(ode_solver):
-	def __init__(self, rhs, T, num_steps, theta, t_out=None, ind_out=None, tol=_TOL):
-		super().__init__(rhs, T, num_steps, t_out, ind_out)
+	def __init__(self, rhs: RHS, T: _TNum, num_steps: int, theta: _TNum, cache_path: bool = False, tol: float=_TOL,
+		stability_center: Optional[Union[_TNum,List[_TNum]]] = None, lipschitz_constant: Optional[Union[_TNum,List[_TNum]]] = None,
+		t_out: Optional[torch.Tensor] = None, ind_out: Optional[torch.Tensor] = None) -> None:
+		'''
+		Parameters
+		----------
+		  rhs:        vector field of the solver
+		  T:          final time
+		  num_steps:  number of steps on the time grid
+		  theta:      implicitness of the method
+		  cache_path:         optional, keep intermediate steps of the solver
+		  tol:                optional, tolerance of the nonlinear solver, ignored for `theta=0`
+		  stability_center:   optional, stability center of the restricted rhs, defaults to unrestricted rhs
+		  lipschitz_constant: optional, lipschitz constant of the restricted rhs, defaults to unrestricted rhs
+		  t_out:              optional, time instances for the output, by default output only final value
+		  ind_out:            optional, indices on the time grid for the output
+		'''
+		if stability_center is not None or lipschitz_constant is not None:
+			if stability_center is None or lipschitz_constant is None:
+				raise ValueError(f"both `stability_center` and `lipschitz_constant` must be either None or given, got stability_center={stability_center} and lipschitz_constant={lipschitz_constant}")
+			if T!=num_steps:
+				raise ValueError(f"if we explicitly control stability of the solver, need step size `h=1` and hence `T=num_steps`, got T={T} and num_steps={num_steps}")
+			for rhs_i in rhs:
+				rhs_i = restrict_theta_stability(rhs_i, theta, stability_center, lipschitz_constant)
+		super().__init__(rhs, T, num_steps, t_out, ind_out, cache_path)
 
 		self.register_buffer('_theta', torch.tensor(theta))
 		self.tol = tol
