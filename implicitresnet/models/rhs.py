@@ -683,9 +683,9 @@ def restrict_theta_stability(rhs, theta, stability_center, lipschitz_constant, m
 
 
 def make_rhs(model, T=1, num_steps=1):
-	return rhs(model, T, num_steps)
+	return RHS(model, T, num_steps)
 
-class rhs(torch.nn.ModuleList):
+class RHS(torch.nn.ModuleList):
 	def __init__(self, model, T=1, num_steps=1):
 		super().__init__(modules=[deepcopy(model) for _ in range(num_steps)])
 		self.h = T / num_steps
