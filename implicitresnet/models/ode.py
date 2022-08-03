@@ -119,6 +119,7 @@ class ode_solver(torch.nn.Module, metaclass=ABCMeta):
 		# `_t` and `_y` are circular buffers
 		self._t = deque([], maxlen=num_steps+1)
 		self._y = deque([], maxlen=num_steps+1)
+		# `interp_coef` are coefficients for linear interpolation of the time grid to arbitrary time instances
 		interp_coef = None
 		if t_out is not None:
 			if not (torch.is_tensor(t_out) and t_out.ndim==1):
@@ -132,6 +133,9 @@ class ode_solver(torch.nn.Module, metaclass=ABCMeta):
 			# assert t_out[0]>=0 and t_out[-1]<=T, "t_out must have values in [0,T]"
 			# use `ind_out` to index the time grid interval that contains `t_out`
 			ind_out = (t_out/self._h).long()
+			# `interp_coef` is defined for each `t_out` relative to the time grid interval that contains it
+			# for example, if `h=0.4` and `t_out=2.3`, then `ind_out=int(2.3/0.4)=5`, `interp_coef=2.3/0.4-5=0.75`
+			# and `y[t=2.3] = 0.25*y[i=5] + 0.75*y[i=6]`
 			interp_coef =  t_out/self._h - ind_out
 		if ind_out is not None:
 			if t_out is not None:
