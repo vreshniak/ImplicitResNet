@@ -215,7 +215,7 @@ class ode_solver(torch.nn.Module, metaclass=ABCMeta):
 	@t_out.setter
 	def t_out(self, t_out):
 		self._ind_out     = (t_out/self._h).long()
-		self._interp_coef = t_out/self._h - ind_out
+		self._interp_coef = t_out/self._h - self._ind_out
 
 	########################################
 
