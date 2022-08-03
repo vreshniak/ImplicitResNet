@@ -128,9 +128,9 @@ class ode_solver(torch.nn.Module, metaclass=ABCMeta):
 			# use `ind_out` to index the time grid interval that contains `t_out`
 			ind_out = (t_out/self._h).long()
 			# `interp_coef` is defined for each `t_out` relative to the time grid interval that contains it
-			# for example, if `h=0.4` and `t_out=2.3`, then `ind_out=int(2.3/0.4)=5`, `interp_coef=2.3/0.4-5=0.75`
-			# and `y[t=2.3] = 0.25*y[i=5] + 0.75*y[i=6]`
-			interp_coef =  t_out/self._h - ind_out
+			# For example, if `h=0.4` and `t_out=2.3`, then `ind_out=int(2.3/0.4)=5`, i.e, `t_out` is in the 6th interval
+			# Hence `interp_coef=2.3/0.4-5=0.75` and `y[t=2.3] = 0.25*y[i=5] + 0.75*y[i=6]`
+			interp_coef = t_out/self._h - ind_out
 		if ind_out is not None:
 			if t_out is not None:
 				raise ValueError("either `t_out` or `ind_out` can be given, not both")
