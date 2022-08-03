@@ -114,7 +114,9 @@ class ode_solver(torch.nn.Module, metaclass=ABCMeta):
 		self.register_buffer('_num_steps', torch.tensor(num_steps))
 		self.register_buffer('_h',         torch.tensor(T/num_steps))
 
-		# self.evolution = False
+		# register buffers used to cache the solution
+		self.cache_path = cache_path
+		# `_t` and `_y` are circular buffers
 		self._t = deque([], maxlen=num_steps+1)
 		self._y = deque([], maxlen=num_steps+1)
 		interp_coef = None
