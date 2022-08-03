@@ -85,9 +85,22 @@ class linsolve_backprop(torch.autograd.Function):
 ###############################################################################
 
 
-
 class ode_solver(torch.nn.Module, metaclass=ABCMeta):
-	def __init__(self, rhs, T, num_steps, t_out=None, ind_out=None):
+	def __init__(self, rhs: RHS, T:_TNum, num_steps: int, cache_path: bool = False,
+		stability_center: Optional[Union[_TNum,List[_TNum]]] = None, lipschitz_constant: Optional[Union[_TNum,List[_TNum]]] = None,
+		t_out: Optional[torch.Tensor] = None, ind_out: Optional[torch.Tensor] = None) -> None:
+		'''
+		Parameters
+		----------
+		  rhs:        vector field of the solver
+		  T:          final time
+		  num_steps:  number of steps on the time grid
+		  cache_path:         optional, flag to keep intermediate steps of the solver
+		  stability_center:   optional, stability center of the restricted rhs, defaults to unrestricted rhs
+		  lipschitz_constant: optional, lipschitz constant of the restricted rhs, defaults to unrestricted rhs
+		  t_out:              optional, time instances for the output, by default return only final value
+		  ind_out:            optional, time grid indices for the output
+		'''
 		super().__init__()
 
 		# ODE count in a network as a class property
