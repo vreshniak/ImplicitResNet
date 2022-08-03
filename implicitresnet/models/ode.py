@@ -125,9 +125,6 @@ class ode_solver(torch.nn.Module, metaclass=ABCMeta):
 				raise ValueError("`t_out` must be increasing sequence")
 			if t_out[0]<0 or t_out[-1]>T:
 				raise ValueError("`t_out` must have values in [0,T]")
-			# assert torch.is_tensor(t_out) and t_out.ndim==1, f"t_out must be a 1d tensor, got t_out = {t_out}"
-			# if t_out.numel()>1: assert torch.amin(t_out[1:]-t_out[:-1])>0, "t_out must be increasing sequence"
-			# assert t_out[0]>=0 and t_out[-1]<=T, "t_out must have values in [0,T]"
 			# use `ind_out` to index the time grid interval that contains `t_out`
 			ind_out = (t_out/self._h).long()
 			# `interp_coef` is defined for each `t_out` relative to the time grid interval that contains it
@@ -143,10 +140,6 @@ class ode_solver(torch.nn.Module, metaclass=ABCMeta):
 				raise ValueError("`ind_out` must be increasing sequence")
 			if ind_out[0]<0 or ind_out[-1]>num_steps:
 				raise ValueError("`ind_out` must have values in [0,num_steps]")
-			# assert t_out is None, "either t_out or ind_out can be given, not both"
-			# assert torch.is_tensor(ind_out) and ind_out.ndim==1, f"ind_out must a 1d tensor, got ind_out = {ind_out}"
-			# if ind_out.numel()>1: assert torch.amin(ind_out[1:]-ind_out[:-1])>0, "ind_out must be increasing sequence"
-			# assert ind_out[0]>=0 and ind_out[-1]<=num_steps, "ind_out must have values in [0,num_steps]"
 		self.register_buffer('_ind_out',     ind_out)
 		self.register_buffer('_interp_coef', interp_coef)
 		self._stat = {}
