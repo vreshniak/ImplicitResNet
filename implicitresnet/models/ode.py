@@ -103,9 +103,9 @@ class ode_solver(torch.nn.Module, metaclass=ABCMeta):
 		'''
 		super().__init__()
 
-		# ODE count in a network as a class property
+		# define ode count in a network as a class property
 		self.__class__.ode_count = getattr(self.__class__,'ode_count',-1) + 1
-		self.name = str(self.__class__.ode_count)+".ode"
+		self.name = f"{self.__class__.ode_count}.ode"
 
 		self.rhs = rhs # this is registered as a submodule
 		self.register_buffer('_T', torch.tensor(T))
