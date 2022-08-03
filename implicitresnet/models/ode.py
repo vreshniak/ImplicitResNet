@@ -107,10 +107,12 @@ class ode_solver(torch.nn.Module, metaclass=ABCMeta):
 		self.__class__.ode_count = getattr(self.__class__,'ode_count',-1) + 1
 		self.name = f"{self.__class__.ode_count}.ode"
 
-		self.rhs = rhs # this is registered as a submodule
-		self.register_buffer('_T', torch.tensor(T))
+		# register rhs as a submodule
+		self.rhs = rhs
+		# register internal buffers describing time grid
+		self.register_buffer('_T',         torch.tensor(T))
 		self.register_buffer('_num_steps', torch.tensor(num_steps))
-		self.register_buffer('_h', torch.tensor(T/num_steps))
+		self.register_buffer('_h',         torch.tensor(T/num_steps))
 
 		# self.evolution = False
 		self._t = deque([], maxlen=num_steps+1)
