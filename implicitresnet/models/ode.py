@@ -257,6 +257,53 @@ class ode_solver(torch.nn.Module, metaclass=ABCMeta):
 
 	########################################
 
+	def trapezoidal_quadrature(self, fun, weight_fun=None):
+		'''Trapezoidal quadrature along the cached solver trajectory'''
+
+		if not self.cache_path:
+			raise RuntimeError("When using path integration, we need `cache_path=True`")
+
+		# quadrature points
+		qt, qy = self._t, self._y
+
+		# quadrature weight
+		qw = [1] * (self.num_steps+1) if weight_fun is None else [weight_fun(t,x) for t,x in zip(qt,qy)]
+		qw[0], qw[-1] = 0.5*qw[0], 0.5*qw[-1]
+
+		# function values along the trajectory
+		qf = [fun(t,x) for t,x in zip(qt,qy)]
+
+		return self.h * sum(wi*yi for wi,yi in zip(qw,qy))
+
+
+	def rectangular_quadrature(self, fun, weight_fun=None, theta=0.0):
+		'''Rectangular quadrature along the cached solver trajectory'''
+
+		if not self.cache_path:
+			raise RuntimeError("When using path integration, we need `cache_path=True`")
+
+		# quadrature points
+		# note that generator comprehensions ( ... for ... ) will not work when qt,qy need to be iterated multiple times, hence use lists
+		# if theta==1, use left endpoint instead of right (same as step_fun in theta_solver)
+		qt = [t+theta*self.h if theta<1 else t for t in self._t[:-1]]
+		qy = [(1-theta)*self._y[i]+theta*self._y[i+1] for i in range(self.num_steps)]
+		# qy = [solver._y[i+1] for i in range(solver.num_steps)]
+		# qy = [solver._y[i] for i in range(solver.num_steps)]
+
+		# quadrature weight
+		qw = [1] * self.num_steps if weight_fun is None else [weight_fun(t,x) for t,x in zip(qt,qy)]
+
+		# function values along the trajectory
+		qf = [fun(t,x) for t,x in zip(qt,qy)]
+
+		return self.h * sum(wi*yi for wi,yi in zip(qw,qy))
+
+	def path_integral(self, fun, weight_fun=None, rule='trapezoidal', *args, **kwargs):
+		if rule=='trapezoidal':
+			return self.trapezoidal_quadrature(fun, weight_fun)
+		elif rule=='rectangular':
+			return self.rectangular_quadrature(fun, weight_fun, *args, **kwargs)
+
 
 	def trajectory(self, y0, t=None):
 		'''Evaluate trajectory of the solver'''
