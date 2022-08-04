@@ -262,20 +262,16 @@ class ode_solver(torch.nn.Module, metaclass=ABCMeta):
 		'''Evaluate trajectory of the solver'''
 		if t is None:
 			# Evaluate solution at grid points
-			if self.cache_path:
-				return self._t, self._y
-			else:
-				ind_out = self._ind_out
-				self.ind_out = torch.arange(self.num_steps+1)
-				odesol = self.forward(y0, return_t=True)
-				self._ind_out = ind_out
-				return odesol
+			ind_out = self._ind_out
+			self.ind_out = torch.arange(self.num_steps+1)
+			odesol = self.forward(y0, return_t=False)
+			self._ind_out = ind_out
 		else:
 			# Evaluate solution at time instances in `t`
 			ind_out     = self._ind_out
 			interp_coef = self._interp_coef
 			self.t_out  = t
-			odesol = self.forward(y0, return_t=True)
+			odesol = self.forward(y0, return_t=False)
 			self._ind_out     = ind_out
 			self._interp_coef = interp_coef
 		return odesol
