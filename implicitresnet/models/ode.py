@@ -255,6 +255,14 @@ class ode_solver(torch.nn.Module, metaclass=ABCMeta):
 	def inv_stability_function(self, z):
 		pass
 
+	@abstractmethod
+	def restrict_stability(self, stability_center, lipschitz_constant):
+		pass
+
+	@abstractmethod
+	def regularize(self, alpha):
+		pass
+
 	########################################
 
 	def trapezoidal_quadrature(self, fun, weight_fun=None):
