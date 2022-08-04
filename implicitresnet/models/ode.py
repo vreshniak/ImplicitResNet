@@ -132,6 +132,8 @@ class ode_solver(torch.nn.Module, metaclass=ABCMeta):
 			# Hence `interp_coef=2.3/0.4-5=0.75` and `y[t=2.3] = 0.25*y[i=5] + 0.75*y[i=6]`
 			interp_coef = t_out/self._h - ind_out
 		if ind_out is not None:
+			# `ind_out` is not None if `t_out` is given, hence set `cache_path` just here
+			self.cache_path = True
 			if t_out is not None:
 				raise ValueError("either `t_out` or `ind_out` can be given, not both")
 			if not (torch.is_tensor(ind_out) and ind_out.ndim==1):
@@ -263,40 +265,41 @@ class ode_solver(torch.nn.Module, metaclass=ABCMeta):
 
 
 	def forward(self, y0, t0=0, return_t=False):
-		if self.training or self._ind_out is not None:
+		# cache trajectory if needed
+		if self.cache_path:
 			# evaluate solution at the grid points
 			self._t.append(t0+0*self.h) # to make it a tensor
 			self._y.append(y0)
 			for step in range(1,self.num_steps+1):
 				self._y.append(self.ode_step(self._t[-1], self._y[-1]))
 				self._t.append(t0+step*self.h)
-
-			# evaluate solution at the given points
-			if self._interp_coef is not None:
-				# returns tensor of shape (batch size, time points, hidden dim)
-				y = [ ((1-c[i])*self._y[i] if c[i]<1 else 0) + (c[i]*self._y[i+1] if c[i]>0 else 0) for i, c in zip(self._ind_out, self._interp_coef) ]
-				y = torch.stack(y, 1)
-				if return_t:
-					t = [ ((1-c[i])*self._t[i] if c[i]<1 else 0) + (c[i]*self._t[i+1] if c[i]>0 else 0) for i, c in zip(self._ind_out, self._interp_coef) ]
-					t = torch.stack(t) if t[0].ndim==0 else torch.stack(t, 1)
-			elif self._ind_out is not None:
-				y = [ self._y[i] for i in self._ind_out ]
-				y = torch.stack(y, 1)
-				if return_t:
-					t = [ self._t[i] for i in self._ind_out ]
-					t = torch.stack(t) if t[0].ndim==0 else torch.stack(t, 1)
-			else:
-				t = self._t[-1]
-				y = self._y[-1]
-
-			if return_t:
-				return t, y
-			else:
-				return y
 		else:
 			y = y0
 			for step in range(self.num_steps):
 				y = self.ode_step(t0+step*self.h, y)
+			t = self.T
+
+		# evaluate solution at the given points
+		if self._interp_coef is not None:
+			# returns tensor of shape (batch size, time points, hidden dim)
+			y = [ ((1-c)*self._y[i] if c<1 else 0) + (c*self._y[i+1] if c>0 else 0) for i,c in zip(self._ind_out,self._interp_coef) ]
+			y = torch.stack(y, 1)
+			if return_t:
+				t = [ ((1-c)*self._t[i] if c<1 else 0) + (c*self._t[i+1] if c>0 else 0) for i,c in zip(self._ind_out,self._interp_coef) ]
+				t = torch.stack(t) if t[0].ndim==0 else torch.stack(t, 1)
+		elif self._ind_out is not None:
+			y = [ self._y[i] for i in self._ind_out ]
+			y = torch.stack(y, 1)
+			if return_t:
+				t = [ self._t[i] for i in self._ind_out ]
+				t = torch.stack(t) if t[0].ndim==0 else torch.stack(t, 1)
+		else:
+			t = self._t[-1]
+			y = self._y[-1]
+
+		if return_t:
+			return t, y
+		else:
 			return y
 
 
