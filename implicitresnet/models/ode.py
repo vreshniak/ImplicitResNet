@@ -303,6 +303,8 @@ class ode_solver(torch.nn.Module, metaclass=ABCMeta):
 			return self.trapezoidal_quadrature(fun, weight_fun)
 		elif rule=='rectangular':
 			return self.rectangular_quadrature(fun, weight_fun, *args, **kwargs)
+		else:
+			raise NotImplementedError(f"Unknown quadrature rule {rule}")
 
 
 	def trajectory(self, y0, t=None):
