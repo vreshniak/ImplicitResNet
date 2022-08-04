@@ -106,44 +106,22 @@ class ode_solver(torch.nn.Module, metaclass=ABCMeta):
 
 		# register rhs as a submodule
 		self.rhs = rhs
+
 		# register internal buffers describing time grid
 		self.register_buffer('_T',         torch.tensor(T))
 		self.register_buffer('_num_steps', torch.tensor(num_steps))
 		self.register_buffer('_h',         torch.tensor(T/num_steps))
 
-		# register buffers used to cache the solution
-		self.cache_path = cache_path
 		# `_t` and `_y` are circular buffers
 		self._t = deque([], maxlen=num_steps+1)
 		self._y = deque([], maxlen=num_steps+1)
-		# `interp_coef` are coefficients for linear interpolation of the time grid to arbitrary time instances
-		interp_coef = None
-		if t_out is not None:
-			if not (torch.is_tensor(t_out) and t_out.ndim==1):
-				raise TypeError(f"`t_out` must be a 1d tensor, got t_out = {t_out}")
-			if t_out.numel()>1 and torch.amin(torch.diff(t_out))<=0:
-				raise ValueError("`t_out` must be increasing sequence")
-			if t_out[0]<0 or t_out[-1]>T:
-				raise ValueError("`t_out` must have values in [0,T]")
-			# use `ind_out` to index the time grid interval that contains `t_out`
-			ind_out = (t_out/self._h).long()
-			# `interp_coef` is defined for each `t_out` relative to the time grid interval that contains it
-			# For example, if `h=0.4` and `t_out=2.3`, then `ind_out=int(2.3/0.4)=5`, i.e, `t_out` is in the 6th interval
-			# Hence `interp_coef=2.3/0.4-5=0.75` and `y[t=2.3] = 0.25*y[i=5] + 0.75*y[i=6]`
-			interp_coef = t_out/self._h - ind_out
-		if ind_out is not None:
-			# `ind_out` is not None if `t_out` is given, hence set `cache_path` just here
-			self.cache_path = True
-			if t_out is not None:
-				raise ValueError("either `t_out` or `ind_out` can be given, not both")
-			if not (torch.is_tensor(ind_out) and ind_out.ndim==1):
-				raise TypeError(f"`ind_out` must a 1d tensor, got ind_out = {ind_out}")
-			if ind_out.numel()>1 and torch.amin(torch.diff(ind_out))<=0:
-				raise ValueError("`ind_out` must be increasing sequence")
-			if ind_out[0]<0 or ind_out[-1]>num_steps:
-				raise ValueError("`ind_out` must have values in [0,num_steps]")
-		self.register_buffer('_ind_out',     ind_out)
-		self.register_buffer('_interp_coef', interp_coef)
+
+		# set parameters that control which values to output
+		self.cache_path = cache_path
+		self.t_out      = t_out
+		self.ind_out    = ind_out
+
+		#
 		self._stat = {}
 
 	########################################
@@ -190,24 +168,48 @@ class ode_solver(torch.nn.Module, metaclass=ABCMeta):
 
 	@property
 	def ind_out(self):
-		return self._ind_out
+		if hasattr(self,'_ind_out'):
+			return self._ind_out
+		else:
+			return None
 	@ind_out.setter
 	def ind_out(self, ind_out):
-		self._ind_out = ind_out
+		if ind_out is not None:
+			self.cache_path = True
+			if not (torch.is_tensor(ind_out) and ind_out.ndim==1):
+				raise TypeError(f"`ind_out` must a 1d tensor, got ind_out = {ind_out}")
+			if ind_out.numel()>1 and torch.amin(torch.diff(ind_out))<=0:
+				raise ValueError("`ind_out` must be increasing sequence")
+			if ind_out[0]<0 or ind_out[-1]>self.num_steps:
+				raise ValueError("`ind_out` must have values in [0,num_steps]")
+			self._ind_out = ind_out
 
 	@property
 	def t_out(self):
-		if self._interp_coef is not None:
-			t_out = self._h * (self._ind_out + self._interp_coef)
-		elif self._ind_out is not None:
-			t_out = self._h * self._ind_out
+		if hasattr(self,'_interp_coef'):
+			t = self._h * (self.ind_out + self._interp_coef)
+		elif hasattr(self,'_ind_out'):
+			t = self._h * self.ind_out
 		else:
-			return None
-		return t_out
+			t = None
+		return t
 	@t_out.setter
 	def t_out(self, t_out):
-		self._ind_out     = (t_out/self._h).long()
-		self._interp_coef = t_out/self._h - self._ind_out
+		if t_out is not None:
+			self.cache_path = True
+			if not (torch.is_tensor(t_out) and t_out.ndim==1):
+				raise TypeError(f"`t_out` must be a 1d tensor, got t_out = {t_out}")
+			if t_out.numel()>1 and torch.amin(torch.diff(t_out))<=0:
+				raise ValueError("`t_out` must be increasing sequence")
+			if t_out[0]<0 or t_out[-1]>self.T:
+				raise ValueError("`t_out` must have values in [0,T]")
+			# use `ind_out` to index the time grid interval that contains `t_out`
+			self.ind_out = (t_out/self._h).long()
+			# `interp_coef` are coefficients for linear interpolation of the time grid to arbitrary time instances
+			# `interp_coef` are defined for each `t_out` relative to the time grid interval that contains it
+			# For example, if `h=0.4` and `t_out=2.3`, then `ind_out=int(2.3/0.4)=5`, i.e, `t_out` is in the 6th interval
+			# Hence `interp_coef=2.3/0.4-5=0.75` and `y[t=2.3] = 0.25*y[i=5] + 0.75*y[i=6]`
+			self._interp_coef = t_out/self._h - self.ind_out
 
 	########################################
 
@@ -295,14 +297,14 @@ class ode_solver(torch.nn.Module, metaclass=ABCMeta):
 			t = self.T
 
 		# evaluate solution at the given points
-		if self._interp_coef is not None:
+		if hasattr(self,'_interp_coef'):
 			# returns tensor of shape (batch size, time points, hidden dim)
 			y = [ ((1-c)*self._y[i] if c<1 else 0) + (c*self._y[i+1] if c>0 else 0) for i,c in zip(self._ind_out,self._interp_coef) ]
 			y = torch.stack(y, 1)
 			if return_t:
 				t = [ ((1-c)*self._t[i] if c<1 else 0) + (c*self._t[i+1] if c>0 else 0) for i,c in zip(self._ind_out,self._interp_coef) ]
 				t = torch.stack(t) if t[0].ndim==0 else torch.stack(t, 1)
-		elif self._ind_out is not None:
+		elif hasattr(self,'_ind_out'):
 			y = [ self._y[i] for i in self._ind_out ]
 			y = torch.stack(y, 1)
 			if return_t:
