@@ -41,6 +41,46 @@ def Fv(F, v):
 	v = torch.nn.functional.normalize(v.reshape(batch_dim,-1), p=2, dim=1)
 	F = F.reshape(batch_dim,-1)
 	return (F*v).sum(axis=1, keepdim=False)
+
+
+
+def dFv_dv(fun, input, v, create_graph=True):
+	'''
+	Compute directional derivative `dFv/dv = grad(Fv) @ v` of the `Fv` component of the vector field `F`
+	'''
+	batch_dim = input.size(0)
+
+	input  = input.detach().requires_grad_(True)
+	output = fun(input)
+	if output.shape!=v.shape:
+		raise ValueError(f"Direction vector `v` must have the same shape as the vector field `F`, got v.shape={v.shape}, F.shape={output.shape}")
+
+	F_v = Fv(output,v).unsqueeze(1)
+
+	###########################################################
+	# compute directional derivative as `dFv/dv = grad(Fv) @ v`
+
+	# dummy vector to compute Jacobian instead of transpose
+	dummy = torch.ones_like(F_v).requires_grad_(True)
+
+	# J^T @ dummy
+	JT_dummy, = torch.autograd.grad(
+		outputs=F_v,
+		inputs=input,
+		grad_outputs=dummy,
+		create_graph=True)
+
+	# (J^T)^T @ v = J @ v
+	dFvdv, = torch.autograd.grad(
+		outputs=JT_dummy,
+		inputs=dummy,
+		grad_outputs=v,
+		create_graph=create_graph)  # need create_graph to find it's derivative
+
+	return dFvdv
+
+
+
 def trace_and_jacobian(fun, input, create_graph=True, n=1, min_eig=None):
 	'''
 	Compute trace and Frobenius norm of the Jacobian averaged over the batch dimension
