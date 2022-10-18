@@ -96,6 +96,37 @@ def dFv_dv(F, input, v, create_graph=True):
 ###############################################################################
 # stochastic estimators
 
+
+@torch.enable_grad()
+def jacobian_frobenius_norm_2(F, input, create_graph=True, n=1, rnd='rademacher'):
+	'''
+	Compute squared Frobenius norm of the Jacobian of `F` at `input`
+	'''
+	batch_dim = input.shape[0]
+
+	if callable(F):
+		input  = input.detach().requires_grad_(True)
+		output = F(input)
+	else:
+		output = F
+
+	t = q = 0
+	if rnd=='rademacher':
+		for _ in range(n):
+			v  = 2 * (torch.rand_like(output)<0.5) - 1
+			Jv = jacT_dot_v(output, input, v)
+			t  = t + Jv*Jv
+		q = n
+	elif rnd=='gaussian':
+		for _ in range(n):
+			v  = torch.randn_like(output)
+			Jv = jacT_dot_v(output, input, v)
+			t  = t + Jv*Jv
+			q  = q + v*v
+		q = q + 1.e-12
+	return (t / q).reshape((batch_dim,-1)).sum(axis=1)
+
+
 def trace_and_jacobian(fun, input, create_graph=True, n=1, min_eig=None):
 	'''
 	Compute trace and Frobenius norm of the Jacobian averaged over the batch dimension
