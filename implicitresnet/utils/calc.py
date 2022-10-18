@@ -1,32 +1,8 @@
 import torch
 
 
-def directional_derivative(fun, input, direction, create_graph=True):
-	input  = input.detach().requires_grad_(True)
-	output = fun(input)
 
-	# v = direction.detach().requires_grad_(True)
-	v = torch.ones_like(output).requires_grad_(True)
-
-	# normalize direction
-	batch_dim = direction.size(0)
-	dir_norm  = torch.clamp( direction.reshape((batch_dim,-1)).norm(dim=1, keepdim=True), min=1.e-16 ) # avoid division by zero
-	direction = direction / dir_norm
-
-	grad_x = torch.autograd.grad(
-		outputs=output,
-		inputs=input,
-		grad_outputs=v,
-		create_graph=True)[0]
-
-	grad_v, = torch.autograd.grad(
-		outputs=grad_x,
-		inputs=v,
-		grad_outputs=direction.detach(),
-		create_graph=create_graph)  # need create_graph to find it's derivative
-
-	return grad_v
-
+###############################################################################
 
 
 def Fv(F, v):
@@ -44,40 +20,76 @@ def Fv(F, v):
 
 
 
-def dFv_dv(fun, input, v, create_graph=True):
+###############################################################################
+# derivatives
+
+
+def jacT_dot_v(output, input, v, create_graph=True):
+	'''
+	Jacobian^T vector product `(d output / d input)^T @ v`
+	'''
+	return torch.autograd.grad(
+		outputs=output,
+		inputs=input,
+		grad_outputs=v,
+		create_graph=create_graph, # need to create_graph to find it's derivative
+		only_inputs=True)[0]
+
+
+def jac_dot_v(output, input, v, create_graph=True):
+	'''
+	Jacobian vector product `(d output / d input) @ v`
+	'''
+	# dummy vector to compute Jacobian instead of transpose
+	dummy = torch.ones_like(output).requires_grad_(True)
+
+	# J^T @ dummy
+	JT_dummy = jacT_dot_v(output, input, dummy, create_graph=True)
+
+	# (J^T)^T @ v = J @ v
+	J_v = jacT_dot_v(JT_dummy, dummy, v, create_graph=create_graph)
+
+	return J_v
+
+
+def directional_derivative(F, input, direction, normalize_direction=False, create_graph=True):
+	'''
+	Compute directional derivative of the function, i.e., `dF/dv = grad(F) @ v`
+	'''
+	batch_dim = input.size(0)
+	if input.shape!=direction.shape:
+		raise ValueError(f"Direction vector must have the same shape as the input, got direction.shape={direction.shape}, input.shape={input.shape}")
+
+	if callable(F):
+		input  = input.detach().requires_grad_(True)
+		output = F(input)
+	else:
+		output = F
+
+	if normalize_direction:
+		direction = torch.nn.functional.normalize(direction.reshape(batch_dim,-1), p=2, dim=1).reshape(input.shape)
+
+	return jac_dot_v(output, input, direction, create_graph)
+
+
+def dFv_dv(F, input, v, create_graph=True):
 	'''
 	Compute directional derivative `dFv/dv = grad(Fv) @ v` of the `Fv` component of the vector field `F`
 	'''
 	batch_dim = input.size(0)
+	if input.shape!=v.shape:
+		raise ValueError(f"Direction vector `v` must have the same shape as the input, got direction.shape={v.shape}, input.shape={input.shape}")
 
-	input  = input.detach().requires_grad_(True)
-	output = fun(input)
-	if output.shape!=v.shape:
-		raise ValueError(f"Direction vector `v` must have the same shape as the vector field `F`, got v.shape={v.shape}, F.shape={output.shape}")
+	if callable(F):
+		input  = input.detach().requires_grad_(True)
+		output = F(input)
+	else:
+		output = F
 
+	# `v` component of `F`
 	F_v = Fv(output,v).unsqueeze(1)
 
-	###########################################################
-	# compute directional derivative as `dFv/dv = grad(Fv) @ v`
-
-	# dummy vector to compute Jacobian instead of transpose
-	dummy = torch.ones_like(F_v).requires_grad_(True)
-
-	# J^T @ dummy
-	JT_dummy, = torch.autograd.grad(
-		outputs=F_v,
-		inputs=input,
-		grad_outputs=dummy,
-		create_graph=True)
-
-	# (J^T)^T @ v = J @ v
-	dFvdv, = torch.autograd.grad(
-		outputs=JT_dummy,
-		inputs=dummy,
-		grad_outputs=v,
-		create_graph=create_graph)  # need create_graph to find it's derivative
-
-	return dFvdv
+	return directional_derivative(F_v, input, v, normalize_direction=False, create_graph=create_graph)
 
 
 
