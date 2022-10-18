@@ -29,6 +29,18 @@ def directional_derivative(fun, input, direction, create_graph=True):
 
 
 
+def Fv(F, v):
+	'''
+	Compute `v` compnent of `F`, i.e., `F_v = (F,v/|v|)`
+	'''
+	if F.shape!=v.shape:
+		raise ValueError(f"`F` and `v` must have the same shape, got F.shape={F.shape} and v.shape={v.shape}")
+	batch_dim = F.shape[0]
+	# unit vector in the given direction `v`
+	v = v.detach()
+	v = torch.nn.functional.normalize(v.reshape(batch_dim,-1), p=2, dim=1)
+	F = F.reshape(batch_dim,-1)
+	return (F*v).sum(axis=1, keepdim=False)
 def trace_and_jacobian(fun, input, create_graph=True, n=1, min_eig=None):
 	'''
 	Compute trace and Frobenius norm of the Jacobian averaged over the batch dimension
