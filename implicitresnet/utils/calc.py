@@ -81,6 +81,9 @@ def dFv_dv(fun, input, v, create_graph=True):
 
 
 
+###############################################################################
+# stochastic estimators
+
 def trace_and_jacobian(fun, input, create_graph=True, n=1, min_eig=None):
 	'''
 	Compute trace and Frobenius norm of the Jacobian averaged over the batch dimension
