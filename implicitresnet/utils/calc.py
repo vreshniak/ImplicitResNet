@@ -31,7 +31,7 @@ def directional_derivative(fun, input, direction, create_graph=True):
 
 def Fv(F, v):
 	'''
-	Compute `v` compnent of `F`, i.e., `F_v = (F,v/|v|)`
+	Compute `v` component of `F`, i.e., `Fv = (F,v/|v|)`
 	'''
 	if F.shape!=v.shape:
 		raise ValueError(f"`F` and `v` must have the same shape, got F.shape={F.shape} and v.shape={v.shape}")
