@@ -178,7 +178,10 @@ def hessian(output, input, create_graph=False):
 
 
 ###############################################################################
-# stochastic estimators
+# Stochastic estimators
+#
+# References:
+# 	1) Bekas, C., Kokiopoulou, E., Saad, Y.: An estimator for the diagonal of a matrix. Appl. Numer. Math. 57(11), 1214–1229 (2007)
 
 
 @torch.enable_grad()
