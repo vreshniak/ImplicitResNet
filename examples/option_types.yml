@@ -62,6 +62,8 @@ a_df: float
 a_df^eps: float
 a_df^ini: float
 a_df^max: float
+a_df^theta: float
+a_df^h:     float
 a_df^steps: int
 a_df^samples: int
 a_dfdn: float
