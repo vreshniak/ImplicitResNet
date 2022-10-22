@@ -92,6 +92,45 @@ def dFv_dv(F, input, v, create_graph=True):
 	return directional_derivative(F_v, input, v, normalize_direction=False, create_graph=create_graph)
 
 
+def gradient(F, input, create_graph=False, normalize=True, p=2):
+	'''
+	Compute gradient of `F`
+	'''
+	batch_dim = input.size(0)
+
+	if callable(F):
+		input  = input.detach().requires_grad_(True)
+		output = F(input)
+	else:
+		output = F
+	if output.dim()!=1:
+		raise ValueError(f"`F` must be scalar valued, i.e., have only batch dimension, got F.shape[1]={output.shape[1]}")
+
+	gradF, = torch.autograd.grad(
+		outputs=output,
+		inputs=input,
+		grad_outputs=torch.ones(batch_dim),
+		create_graph=create_graph,  # need create_graph to find it's derivative
+		only_inputs=True)
+	if normalize:
+		gradF = torch.nn.functional.normalize(gradF.reshape(batch_dim,-1),p=p,dim=1).reshape(input.shape)
+
+	return gradF
+
+
+def grad_norm_2(F, input, create_graph=False, normalize=True, p=2):
+	'''
+	Compute gradient of the squared 2-norm of `F`, i.e., `grad |F|^2`
+	'''
+	batch_dim = input.size(0)
+
+	if callable(F):
+		input  = input.detach().requires_grad_(True)
+		output = F(input)
+	else:
+		output = F
+	output = output.reshape(batch_dim,-1).pow(2).sum(dim=1)
+	return gradient(output, input, create_graph, normalize, p)
 
 ###############################################################################
 # stochastic estimators
