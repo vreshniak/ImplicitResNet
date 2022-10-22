@@ -132,6 +132,51 @@ def grad_norm_2(F, input, create_graph=False, normalize=True, p=2):
 	output = output.reshape(batch_dim,-1).pow(2).sum(dim=1)
 	return gradient(output, input, create_graph, normalize, p)
 
+
+def jacobian(F, input, create_graph=False):
+	'''
+	Compute exact Jacobian of `F`, i.e., `dF/dinput`
+	Evaluation is performed elementwise and is quite inefficient
+	'''
+	jacobian = []
+
+	if callable(F):
+		input  = input.detach().requires_grad_(True)
+		output = F(input)
+	else:
+		output = F
+
+	Id = torch.zeros(*output.shape).to(input.device)
+	for i in range(output.numel()):
+		Id.data.flatten()[i] = 1.0
+
+		jac_i, = torch.autograd.grad(
+			outputs=output,
+			inputs=input,
+			grad_outputs=Id,
+			create_graph=create_graph,  # need create_graph to find it's derivative
+			only_inputs=True)
+
+		jacobian.append(jac_i)
+
+		Id.data.flatten()[i] = 0.0
+	return torch.stack(jacobian, dim=0).reshape(output.shape+input.shape)
+
+
+def hessian(output, input, create_graph=False):
+	# assert output.size(1)==1, "output must be scalar function, got output.size(1)="+str(output.size(1))
+
+	# gradient of output
+	output_grad = torch.autograd.grad(
+		outputs=output,
+		inputs=input,
+		create_graph=True,  # need create_graph to find it's derivative
+		only_inputs=True)[0]
+
+	hessian = jacobian(output_grad, input, create_graph)
+	return hessian
+
+
 ###############################################################################
 # stochastic estimators
 
@@ -379,40 +424,7 @@ class JacDiagReg(torch.nn.Module):
 
 
 
-###############################################################################
 
-def jacobian(output, input, create_graph=False):
-	jacobian = []
-
-	Id = torch.zeros(*output.shape).to(input.device)
-	for i in range(output.numel()):
-		Id.data.flatten()[i] = 1.0
-
-		jac_i = torch.autograd.grad(
-			outputs=output,
-			inputs=input,
-			grad_outputs=Id,
-			create_graph=create_graph,  # need create_graph to find it's derivative
-			only_inputs=True)[0]
-
-		jacobian.append(jac_i)
-
-		Id.data.flatten()[i] = 0.0
-	return torch.stack(jacobian, dim=0).reshape(output.shape+input.shape)
-
-
-def hessian(output, input, create_graph=False):
-	# assert output.size(1)==1, "output must be scalar function, got output.size(1)="+str(output.size(1))
-
-	# gradient of output
-	output_grad = torch.autograd.grad(
-		outputs=output,
-		inputs=input,
-		create_graph=True,  # need create_graph to find it's derivative
-		only_inputs=True)[0]
-
-	hessian = jacobian(output_grad, input, create_graph)
-	return hessian
 
 
 ###############################################################################
