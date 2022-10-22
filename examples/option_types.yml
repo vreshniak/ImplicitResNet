@@ -59,6 +59,12 @@ a_tv: float
 a_jac: float
 a_f: float
 a_df: float
+a_df^eps: float
+a_df^ini: float
+a_df^max: float
+a_df^steps: int
+a_df^samples: int
+a_dfdn: float
 a_div: float
 a_rad: float
 a_cnt: float
