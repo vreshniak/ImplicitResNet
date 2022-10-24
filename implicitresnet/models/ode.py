@@ -632,6 +632,260 @@ class theta_solver(ode_solver):
 		self.r_alpha = alpha
 		self.r_collect_rhs_stat = collect_rhs_stat
 
+
+	def compute_regularizers(self):
+		'''Compute regularizers'''
+		reg  = {}
+		stat = {}
+		if self.training:
+			name      = f"{self.name}_"
+			batch_dim = self._y[-1].size(0)
+			dim       = self._y[-1].numel() // batch_dim
+
+			_t0 = self._t[0]
+			_y0 = self._y[0]
+
+			# spectral normalization has to be performed only once per forward pass, so freeze here
+			self.rhs.eval()
+
+			# @torch.enable_grad()
+			# def fgrad(t,z,norm=True):
+			# 	# z = z.clone().detach().requires_grad_(True)
+			# 	z  = z.requires_grad_(True)
+			# 	F  = self.rhs(t,z).reshape(batch_dim,-1).pow(2).sum(dim=1)
+			# 	dF = torch.autograd.grad(F, z, grad_outputs=torch.ones(batch_dim), create_graph=False, retain_graph=False, only_inputs=True)[0]
+			# 	if norm:
+			# 		return torch.nn.functional.normalize(dF,p=2).detach()
+			# 		# return torch.nn.functional.normalize(dF,p=float('inf')).detach()
+			# 	else:
+			# 		return dF.detach()
+
+			#######################################################################
+			# evaluate quantities for regularizers and statistics
+
+			if self.r_alpha['div']!=0 or any([key in self.r_collect_rhs_stat for key in ['div','all']]):
+				int_div = self.r_integrate(lambda t,y: calc.jacobian_diag(lambda x: self.rhs(t,x),y).mean())
+
+			if self.r_alpha['cnt']!=0 or any([key in self.r_collect_rhs_stat for key in ['cnt','all']]):
+				centers = [ fi.center for fi in self.rhs ]
+
+			if self.r_alpha['rad']!=0 or any([key in self.r_collect_rhs_stat for key in ['rad','all']]):
+				radiuses = [ fi.radius for fi in self.rhs ]
+
+			if self.r_alpha['lip']!=0 or any([key in self.r_collect_rhs_stat for key in ['lip','all']]):
+				lipschitz_constants = [ fi.lipschitz_constant for fi in self.rhs ]
+
+			if self.r_alpha['stabdiv']!=0 or any([key in self.r_collect_rhs_stat for key in ['stabdiv','all']]):
+				if self.rhs_theta!=0:
+					raise NotImplementedError("`stabdiv` regularizer currently works only with `theta=0`")
+				# int_stabdiv = self.r_integrate(lambda t,y: self.stability_function(calc.jacobian_diag(lambda x: self.rhs(t,x),y)).pow(2).mean())
+				# int_stabdiv = self.r_integrate(lambda t,y: calc.jacobian_fun_diag(lambda x: self.rhs(t,x),y).reshape((batch_dim,-1)).sum(axis=1).pow(2).mean())
+				int_stabdiv = self.r_integrate(lambda t,y: calc.jacobian_frobenius_norm_2(lambda x:x+self.rhs(t,x),y,n=1).mean()/dim)
+
+				stabdiveps = self.r_alpha['stabdiv^eps']
+				for _ in range(self.r_alpha['stabdiv^samples']):
+					dy = stabdiveps * torch.nn.functional.normalize(torch.rand_like(_y0),p=float('inf'))
+					int_stabdiv = int_stabdiv + calc.jacobian_frobenius_norm_2(lambda x:x+self.rhs(_t0,x),_y0+stabdiveps,n=1).mean() / dim
+				int_stabdiv = int_stabdiv / (1+self.r_alpha['stabdiv^samples'])
+
+				# int_stabdiv = self.r_integrate(lambda t,y: calc.jacobian_frobenius_norm_2(lambda x:(tt@x.unsqueeze(2)).squeeze(2)-self.rhs(t,x),y,n=1).mean()/dim)
+
+				# x = self._y[0].clone().detach().requires_grad_(True)
+				# jac = calc.jacobian((tt@x.unsqueeze(2)).squeeze(2),x,True)
+				# jac = torch.stack([jac[i,:,i,:] for i in range(jac.shape[0])])
+				# print( (jac - tt).sum() )
+				# exit()
+
+				# int_stabdiv = calc.jacobian_frobenius_norm_2(lambda x:x+self.rhs(0,x),self._y[0],n=100).mean()/dim
+				# dy = 1 * torch.sqrt((self._y[1]-self._y[0]).pow(2).reshape((batch_dim,-1)).sum(axis=1,keepdim=True))
+				# int_stabdiv = 0
+				# for _ in range(1):
+				# 	y = self._y[0] + 1.e-1 * torch.nn.functional.normalize(torch.rand_like(self._y[0]))
+				# 	int_stabdiv = int_stabdiv + calc.jacobian_frobenius_norm_2(lambda x:x+self.rhs(0,x),y,n=1).mean()/dim
+				# int_stabdiv = int_stabdiv / 2
+
+			if self.r_alpha['stabcnt']!=0 or any([key in self.r_collect_rhs_stat for key in ['stabcnt','all']]):
+				stability_centers = [ fi.stability_center for fi in self.rhs ]
+
+			if self.r_alpha['stabrad']!=0 or any([key in self.r_collect_rhs_stat for key in ['stabrad','all']]):
+				stability_radiuses = [ fi.stability_radius for fi in self.rhs ]
+
+			if self.r_alpha['f']!=0 or any([key in self.r_collect_rhs_stat for key in ['f','all']]):
+				# int_F2 = self.r_integrate(lambda t,y: self.rhs(t,y).pow(2).mean())
+				int_F2 = self.rhs(0,self._y[0]).pow(2).mean()
+				# int_F2 = (self.rhs(0,self._y[1])+(self._y[1]-self._y[0]).detach()).pow(2).mean()
+
+			if self.r_alpha['dfdn']!=0 or any([key in self.r_collect_rhs_stat for key in ['dfdn','all']]):
+				dfdneps = self.r_alpha['dfdn^eps']
+
+				int_dfdn = 0
+				for _ in range(self.r_alpha['dfdn^samples']):
+					# perturb `self._y[0]` to avoid potentially zero level curve
+					dy = dfdneps * torch.nn.functional.normalize(torch.rand_like(_y0),p=float('inf'))
+
+					# perturbation along the direction orthogonal to the level curves of |F|^2
+					df = calc.grad_norm_2( lambda x: self.rhs(_t0,x), _y0+dy, normalize=True )
+					df = torch.cat((df,-df), dim=0)
+
+					y0_cat = torch.cat((_y0,_y0),dim=0).detach()
+					y0_df  = (y0_cat+dfdneps*df).detach()
+
+					int_dfdn = int_dfdn + ( calc.dFv_dv(lambda x:self.rhs(_t0,x),y0_df,v=df) + 1.0 ).pow(2).mean()
+				int_dfdn = int_dfdn / self.r_alpha['dfdn^samples']
+
+			if self.r_alpha['df']!=0 or any([key in self.r_collect_rhs_stat for key in ['df','all']]):
+				# perturbation size
+				if self.r_alpha['df^eps'] == 0: warnings.warn("alpha['df^eps']=0")
+				dfeps = self.r_alpha['df^eps']
+				dfini = self.r_alpha['df^ini'] if self.r_alpha['df^ini']!=0 else dfeps
+				dfmax = self.r_alpha['df^max']
+
+				int_df = 0
+				for _ in range(self.r_alpha['df^samples']):
+					# `l_inf` perturbation of `self._y[0]` to avoid zero level curve
+					dy = dfeps * torch.nn.functional.normalize(torch.rand_like(_y0),p=float('inf'))
+
+					# perturbation along the direction orthogonal to the level curves of |F|^2
+					df = dfini * calc.grad_norm_2( lambda x: self.rhs(_t0,x), _y0+dy, normalize=True )
+					df = torch.cat((df,-df), dim=0)
+
+					# starting points of two adjoint trajectories along `df`
+					y0_cat = torch.cat((_y0,_y0),dim=0).detach()
+					y0_df  = (y0_cat+df).detach()
+
+					y_dist = torch.linalg.vector_norm((y0_df-y0_cat).reshape((y0_df.size(0),-1)), ord=2, dim=1, keepdim=False)
+					y_w = self.r_alpha['f'] - (y_dist/dfmax) * (self.r_alpha['f']-self.r_alpha['df'])
+					int_df = int_df + (y_w*(self.rhs(_t0,y0_df)+df).pow(2).reshape(y0_df.size(0),-1).sum(dim=1)).sum() / y0_df.numel()
+
+					i = 0
+					for i in range(self.r_alpha['df^steps']):
+						# adjoint step
+						y_df = self.solve_adjoint(y0_df, theta=self.r_alpha['df^theta'], h=self.r_alpha['df^h']).detach()
+						# distance from the data point
+						y_diff = y_df - y0_cat
+						y_dist = torch.linalg.vector_norm(y_diff.reshape((y_df.size(0),-1)), ord=2, dim=1, keepdim=False) #.reshape([y_df.size(0)]+[1]*(y_df.dim()-1))
+						# reached max distance?
+						y_flag = y_dist>dfmax
+						if y_flag.any():
+							y0_dist = torch.linalg.vector_norm(y_diff.reshape((y_df.size(0),-1)), ord=2, dim=1, keepdim=False).reshape([y_df.size(0)]+[1]*(y_df.dim()-1))
+							y_df[y_flag,...] = (y0_cat+(dfmax/y0_dist)*(y0_df-y0_cat))[y_flag,...]
+							# y_df[y_flag,...] = (y0_cat+(dfmax/y_dist)*y_diff)[y_flag,...]
+							y0_df = y0_df.detach().clone()
+							y0_df[~y_flag,...] = y_df[~y_flag,...]
+						else:
+							y0_df = y_df
+						y_w = self.r_alpha['f'] - (torch.clamp(y_dist,max=dfmax)/dfmax) * (self.r_alpha['f']-self.r_alpha['df'])
+						int_df = int_df + (y_w*(self.rhs(_t0,y_df)+y_diff).pow(2).reshape(y_df.size(0),-1).sum(dim=1)).sum() / y_df.numel()
+						if y_flag.all():
+							break
+
+					int_df = int_df / self.r_alpha['df^samples'] / (i+1)
+
+			#######################################################################
+			# regularizers
+
+			# divergence regularizer
+			if self.r_alpha['div']!=0:
+				reg[name+'div'] = self.r_alpha['div'] * torch.sigmoid(int_div)
+				# reg[name+'div'] = solver.r_alpha['div'] * int_div
+
+			# trace regularizer
+			if self.r_alpha['tr0']!=0:
+				reg[name+'tr0'] = self.r_alpha['tr0'] * int_tr0
+
+			# stability divergence regularizer
+			if self.r_alpha['stabdiv']!=0:
+				reg[name+'stabdiv'] = self.r_alpha['stabdiv'] * int_stabdiv
+
+			# spectral center regularizer
+			if self.r_alpha['cnt']!=0:
+				# reg[name+'cnt'] = solver.r_alpha['cnt'] * regcenter
+				reg[name+'cnt'] = self.r_alpha['cnt'] * sum(centers) / len(centers)
+
+			# spectral radius regularizer
+			if self.r_alpha['rad']!=0:
+				# reg[name+'rad'] = solver.r_alpha['rad'] * regradius
+				reg[name+'rad'] = self.r_alpha['rad'] * sum(radiuses) / len(radiuses)
+
+			# lipschitz constant regularizer
+			if self.r_alpha['lip']!=0:
+				reg[name+'lip'] = self.r_alpha['lip'] * sum(lipschitz_constants) / len(lipschitz_constants)
+
+			# stability center regularizer
+			if self.r_alpha['stabcnt']!=0:
+				reg[name+'stabcnt'] = self.r_alpha['stabcnt'] * sum(stability_centers) / len(stability_centers)
+
+			# stability radius regularizer
+			if self.r_alpha['stabrad']!=0:
+				reg[name+'stabrad'] = self.r_alpha['stabrad'] * sum(stability_radiuses) / len(stability_radiuses)
+
+			# vector field magnitude
+			if self.r_alpha['f']!=0:
+				reg[name+'f'] = self.r_alpha['f'] * int_F2
+
+			if self.r_alpha['df']!=0:
+				# reg[name+'df'] = self.r_alpha['df'] * int_df
+				reg[name+'df'] = int_df
+
+			if self.r_alpha['dfdn']!=0:
+				reg[name+'dfdn'] = self.r_alpha['dfdn'] * int_dfdn
+
+			#######################################################################
+			# statistics
+			if any([key in self.r_collect_rhs_stat for key in ['div','all']]):
+				stat['rhs/'+name+'div'] = int_div
+
+			if any([key in self.r_collect_rhs_stat for key in ['tr0','all']]):
+				stat['rhs/'+name+'tr0'] = int_tr0
+
+			if any([key in self.r_collect_rhs_stat for key in ['stabdiv','all']]):
+				stat['rhs/'+name+'stabdiv'] = int_stabdiv
+
+			if any([key in self.r_collect_rhs_stat for key in ['cnt','all']]):
+				for i, ci in enumerate(centers):
+					stat[f'rhs/{name}cnt_{i}'] = ci
+
+			if any([key in self.r_collect_rhs_stat for key in ['rad','all']]):
+				for i, ri in enumerate(radiuses):
+					stat[f'rhs/{name}rad_{i}'] = ri
+
+			if any([key in self.r_collect_rhs_stat for key in ['lip','all']]):
+				for i, li in enumerate(lipschitz_constants):
+					stat[f'rhs/{name}lip_{i}'] = li
+
+			if any([key in self.r_collect_rhs_stat for key in ['stabcnt','all']]):
+				for i, sci in enumerate(stability_centers):
+					stat[f'rhs/{name}stabcnt_{i}'] = sci
+
+			if any([key in self.r_collect_rhs_stat for key in ['stabrad','all']]):
+				for i, sri in enumerate(stability_radiuses):
+					stat[f'rhs/{name}stabrad_{i}'] = sri
+
+			if any([key in self.r_collect_rhs_stat for key in ['f','all']]):
+				stat['rhs/'+name+'f'] = int_F2
+
+			if any([key in self.r_collect_rhs_stat for key in ['df','all']]):
+				stat['rhs/'+name+'df'] = int_df
+
+			if any([key in self.r_collect_rhs_stat for key in ['dfdn','all']]):
+				stat['rhs/'+name+'dfdn'] = int_dfdn
+
+			#######################################################################
+			# note that solver.training has not been changed by rhs.eval()
+			self.rhs.train(mode=self.training)
+
+			if not hasattr(self, 'regularizer'):
+				setattr(self, 'regularizer', reg)
+			else:
+				for key, val in reg.items():
+					self.regularizer[key] = val
+			if self.r_collect_rhs_stat:
+				setattr(self.rhs, 'statistics', stat)
+		return None
+
+
+	########################################
+
 	def step_fun(self, t, x, y):
 		# if theta==1, use left endpoint
 		t = (t + self.theta * self.h) if self.theta<1 else t
