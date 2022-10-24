@@ -63,15 +63,19 @@ a_df^eps: float
 a_df^ini: float
 a_df^max: float
 a_df^theta: float
-a_df^h:     float
+a_df^h: float
 a_df^steps: int
 a_df^samples: int
 a_dfdn: float
+a_dfdn^samples: int
+a_dfdn^eps: float
 a_div: float
 a_rad: float
 a_cnt: float
 a_lip: float
 a_stabdiv: float
+a_stabdiv^samples: int
+a_stabdiv^eps: float
 a_stabrad: float
 a_stabcnt: float
 # adaugm: float
