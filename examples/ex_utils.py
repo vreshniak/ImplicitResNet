@@ -358,9 +358,10 @@ def eval_model_spectrum(model, data, batch=1, approximate=True, eigs_per_batch=N
 	x = data
 	for i, m in enumerate(model):
 		if not isinstance(m, theta_solver) or m(x).shape!=x.shape:
+			print(f"Can't evaluate spectrum for layer {m.name}, skipping")
 			x = m(x)
 			continue
-		print(f'Evaluating spectrum for {m.name}')
+		print(f'Evaluating spectrum for layer {m.name}')
 		if isinstance(m, theta_solver):
 			theta  = m.theta.item()
 			odesol = m.trajectory(x)
