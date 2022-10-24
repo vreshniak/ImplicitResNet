@@ -162,6 +162,12 @@ class ode_solver(torch.nn.Module, metaclass=ABCMeta):
 		self.t_out      = t_out
 		self.ind_out    = ind_out
 
+		# by default, there are no regularizers
+		self.has_regularizers = False
+
+		# is this adjoint solver? By default, it is not
+		self.adjoint = False
+
 		#
 		self._stat = {}
 
