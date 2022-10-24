@@ -48,6 +48,24 @@ def addprop(inst, name, method):
 		cls.__perinstance = True
 		inst.__class__ = cls
 	setattr(cls, name, property(method))
+
+
+def to_range(input: Union[_TNum, List[_TNum]]) -> List[torch.Tensor]:
+	'''Convert `input` to range of the form [bound_1,initial,bound_2]'''
+	if isinstance(input, list):
+		if len(input)<1 or len(input)>3:
+			raise ValueError(f"length of input list should be 1, 2 or 3, got {str(input)}")
+		if len(input)==1:
+			output = 3*input
+		elif len(input)==2:
+			output = [input[0],input[0],input[1]]
+		else:
+			output = input
+	else:
+		output = 3*[input]
+	return torch.tensor(output)
+
+
 ###############################################################################
 ###############################################################################
 
