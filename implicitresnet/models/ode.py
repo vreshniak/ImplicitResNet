@@ -588,6 +588,50 @@ class theta_solver(ode_solver):
 
 		return self
 
+
+	def regularize(self, alpha, quadrature_rule='trapezoidal', collect_rhs_stat=_collect_rhs_stat):
+		'''Apply regularization to the solver'''
+
+		self.has_regularizers = True
+		self.cache_path = True
+
+		# copy to avoid unexpected behavior if alpha is changed after passing to this method
+		alpha = alpha.copy()
+
+		# default regularizers
+		if 'tr0'  not in alpha: alpha['tr0']  = 0.0
+		if 'jac'  not in alpha: alpha['jac']  = 0.0
+		if 'f'    not in alpha: alpha['f']    = 0.0
+		##########
+		if 'df'         not in alpha: alpha['df']         = 0.0
+		if 'df^eps'     not in alpha: alpha['df^eps']     = 1.e-2
+		if 'df^theta'   not in alpha: alpha['df^theta']   = None
+		if 'df^h'       not in alpha: alpha['df^h']       = None
+		if 'df^steps'   not in alpha: alpha['df^steps']   = 0
+		if 'df^samples' not in alpha: alpha['df^samples'] = 1
+		if 'df^ini'     not in alpha: alpha['df^ini']     = 0
+		if 'df^max'     not in alpha: alpha['df^max']     = 10
+		##########
+		if 'dfdn' not in alpha: alpha['dfdn'] = 0.0
+		if 'dfdn^eps'     not in alpha: alpha['dfdn^eps']     = 1.e-3
+		if 'dfdn^samples' not in alpha: alpha['dfdn^samples'] = 1
+		##########
+		if 'div'  not in alpha: alpha['div']  = 0.0
+		if 'rad'  not in alpha: alpha['rad']  = 0.0
+		if 'cnt'  not in alpha: alpha['cnt']  = 0.0
+		if 'lip'  not in alpha: alpha['lip']  = 0.0
+		if 'tv'   not in alpha: alpha['tv']   = 0.0
+		if 'stabcnt' not in alpha: alpha['stabcnt'] = 0.0
+		if 'stabrad' not in alpha: alpha['stabrad'] = 0.0
+		##########
+		if 'stabdiv' not in alpha: alpha['stabdiv'] = 0.0
+		if 'stabdiv^samples' not in alpha: alpha['stabdiv^samples'] = 0
+		if 'stabdiv^eps' not in alpha: alpha['stabdiv^eps'] = 1.e-3
+
+		self.r_integrate = lambda f: self.path_integral(f, rule=quadrature_rule, theta=self.theta) / self.T
+		self.r_alpha = alpha
+		self.r_collect_rhs_stat = collect_rhs_stat
+
 	def step_fun(self, t, x, y):
 		# if theta==1, use left endpoint
 		t = (t + self.theta * self.h) if self.theta<1 else t
