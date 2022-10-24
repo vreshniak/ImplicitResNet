@@ -211,7 +211,13 @@ class ode_solver(torch.nn.Module, metaclass=ABCMeta):
 
 	@property
 	def h(self):
-		return self._h
+		if not self.adjoint:
+			return self._h
+		else:
+			if hasattr(self,'_adj_h'):
+				return -self._adj_h
+			else:
+				return -self._h
 
 	@property
 	def ind_out(self):
