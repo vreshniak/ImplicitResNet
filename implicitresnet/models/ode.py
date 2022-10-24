@@ -35,6 +35,21 @@ _debug = False
 
 ###############################################################################
 ###############################################################################
+# helper functions
+
+
+def addprop(inst, name, method):
+	r'''Add property to existing instance of a class
+	https://stackoverflow.com/questions/2954331/dynamically-adding-property-in-python
+	'''
+	cls = type(inst)
+	if not hasattr(cls, '__perinstance'):
+		cls = type(cls.__name__, (cls,), {})
+		cls.__perinstance = True
+		inst.__class__ = cls
+	setattr(cls, name, property(method))
+###############################################################################
+###############################################################################
 
 
 class linsolve_backprop(torch.autograd.Function):
