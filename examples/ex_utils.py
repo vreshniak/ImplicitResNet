@@ -354,8 +354,7 @@ def eval_model_spectrum(model, data, batch=1, approximate=True, eigs_per_batch=N
 	# model_spectralnrm  = []
 	model_rhs_spectrum      = {}
 	model_rhs_gershcircles  = {}
-	# model_rhs_gershcenters  = {}
-	# model_rhs_gershradiuses = {}
+
 	x = data
 	for i, m in enumerate(model):
 		if not isinstance(m, theta_solver) or m(x).shape!=x.shape:
