@@ -2,6 +2,8 @@ import time
 import warnings
 from collections import deque
 from abc import ABCMeta, abstractmethod
+from typing import Union, List, Optional
+from types import MethodType
 
 import torch
 from ..solvers import nsolve, linsolve
@@ -11,6 +13,7 @@ from .rhs import RHS, restrict_theta_stability
 
 
 
+_TNum = Union[int, float]
 
 
 ###############################################################################
