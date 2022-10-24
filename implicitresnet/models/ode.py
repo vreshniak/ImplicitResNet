@@ -6,6 +6,7 @@ from abc import ABCMeta, abstractmethod
 import torch
 from ..solvers import nsolve, linsolve
 from ..utils import calc
+from ..utils.spectral import spectral_norm
 
 
 ###############################################################################
