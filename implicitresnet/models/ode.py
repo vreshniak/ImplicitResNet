@@ -320,6 +320,10 @@ class ode_solver(torch.nn.Module, metaclass=ABCMeta):
 	def regularize(self, alpha):
 		pass
 
+	@abstractmethod
+	def compute_regularizers(self):
+		pass
+
 	########################################
 
 	def trapezoidal_quadrature(self, fun, weight_fun=None):
