@@ -301,6 +301,10 @@ class ode_solver(torch.nn.Module, metaclass=ABCMeta):
 		pass
 
 	@abstractmethod
+	def solve_adjoint(self, yT):
+		pass
+
+	@abstractmethod
 	def stability_function(self, z):
 		pass
 
