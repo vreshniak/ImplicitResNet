@@ -85,7 +85,11 @@ def parse_args(config='options.yml'):
 	reg_keys = [key.split('_')[1] for key in vars(args).keys() if 'a_' in key]
 	for key in reg_keys:
 		val = vars(args)[f'a_{key}']
-		args.alpha[key] = val if val is not None else 0.0
+		if val is not None:
+			args.alpha[key] = val
+		elif '^' not in key:
+			args.alpha[key] = 0
+			# args.alpha[key] = val if val is not None else 0.0
 		del vars(args)[f'a_{key}']
 
 	# # regularizers
