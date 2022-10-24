@@ -408,13 +408,17 @@ def eval_model_spectrum(model, data, batch=1, approximate=True, eigs_per_batch=N
 
 		# collect all spectral properties in a single dict
 		#a, b = m.rhs.get_spectral_spread()
-		c, r = m.rhs[0].get_spectral_circle()
+		if hasattr(m.rhs[0],'get_spectral_circle'):
+			c, r = m.rhs[0].get_spectral_circle()
+			c, r = c.item(), r.item()
+		else:
+			c, r = 0, 0
 		model_rhs_spectrum[m.name] = {
 			'eigenvalues': np.concatenate(np.array(m_rhs_spectrum)),
 			'gershgorin_circles': gershgorin_patches,
 			#'gershgorin_circles': m_rhs_gershcircles,
 			#'spectral_limits': [a.item(), b.item()],
-			'spectral_circle': [c.item(), r.item()],
+			'spectral_circle': [c,r],
 			}
 		# model_rhs_spectrum[m.name]     = {'spectrum': np.concatenate(np.array(m_rhs_spectrum))}
 		# model_rhs_gershcircles[m.name] = gershgorin_patches
