@@ -379,8 +379,6 @@ def eval_model_spectrum(model, data, batch=1, approximate=True, eigs_per_batch=N
 						centers  = np.diag(jac[ii,:,ii,:]).ravel()
 						radiuses = np.sum(np.abs(jac[ii,:,ii,:]), axis=1) - np.abs(centers)
 						m_rhs_gershcircles.append([[c,r] for c,r in zip(centers,radiuses)])
-						# model_rhs_gershcenters.append(centers)
-						# model_rhs_gershradiuses.append(radiuses)
 				# model_spectralnrm.append(np.amax(theta_stab(m_rhs_spectrum[-1][:,0]+1j*m_rhs_spectrum[-1][:,1], theta)))
 		else:
 			m_rhs_spectrum     = []
