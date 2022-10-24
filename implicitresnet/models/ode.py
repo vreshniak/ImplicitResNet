@@ -7,6 +7,10 @@ import torch
 from ..solvers import nsolve, linsolve
 from ..utils import calc
 from ..utils.spectral import spectral_norm
+from .rhs import RHS, restrict_theta_stability
+
+
+
 
 
 ###############################################################################
