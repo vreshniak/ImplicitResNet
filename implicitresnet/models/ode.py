@@ -341,7 +341,7 @@ class ode_solver(torch.nn.Module, metaclass=ABCMeta):
 		# function values along the trajectory
 		qf = [fun(t,x) for t,x in zip(qt,qy)]
 
-		return self.h * sum(wi*yi for wi,yi in zip(qw,qy))
+		return self.h * sum(wi*fi for wi,fi in zip(qw,qf))
 
 
 	def rectangular_quadrature(self, fun, weight_fun=None, theta=0.0):
