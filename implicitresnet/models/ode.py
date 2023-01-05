@@ -353,7 +353,7 @@ class ode_solver(torch.nn.Module, metaclass=ABCMeta):
 		# quadrature points
 		# note that generator comprehensions ( ... for ... ) will not work when qt,qy need to be iterated multiple times, hence use lists
 		# if theta==1, use left endpoint instead of right (same as step_fun in theta_solver)
-		qt = [t+theta*self.h if theta<1 else t for t in self._t[:-1]]
+		qt = [t+theta*self.h if theta<1 else t for t in self._t][:-1]
 		qy = [(1-theta)*self._y[i]+theta*self._y[i+1] for i in range(self.num_steps)]
 		# qy = [solver._y[i+1] for i in range(solver.num_steps)]
 		# qy = [solver._y[i] for i in range(solver.num_steps)]
