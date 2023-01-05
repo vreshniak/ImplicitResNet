@@ -230,7 +230,7 @@ class ode_solver(torch.nn.Module, metaclass=ABCMeta):
 		if ind_out is not None:
 			self.cache_path = True
 			if not (torch.is_tensor(ind_out) and ind_out.ndim==1):
-				raise TypeError(f"`ind_out` must a 1d tensor, got ind_out = {ind_out}")
+				raise TypeError(f"`ind_out` must be a 1d tensor, got ind_out = {ind_out}")
 			if ind_out.numel()>1 and torch.amin(torch.diff(ind_out))<=0:
 				raise ValueError("`ind_out` must be increasing sequence")
 			if ind_out[0]<0 or ind_out[-1]>self.num_steps:
