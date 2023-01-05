@@ -240,12 +240,11 @@ class ode_solver(torch.nn.Module, metaclass=ABCMeta):
 	@property
 	def t_out(self):
 		if hasattr(self,'_interp_coef'):
-			t = self._h * (self.ind_out + self._interp_coef)
+			return self._h * (self.ind_out + self._interp_coef)
 		elif hasattr(self,'_ind_out'):
-			t = self._h * self.ind_out
+			return self._h * self.ind_out
 		else:
-			t = None
-		return t
+			return None
 	@t_out.setter
 	def t_out(self, t_out):
 		if t_out is not None:
