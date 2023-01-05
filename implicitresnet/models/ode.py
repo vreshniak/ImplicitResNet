@@ -257,10 +257,10 @@ class ode_solver(torch.nn.Module, metaclass=ABCMeta):
 				raise ValueError("`t_out` must have values in [0,T]")
 			# use `ind_out` to index the time grid interval that contains `t_out`
 			self.ind_out = (t_out/self._h).long()
-			# `interp_coef` are coefficients for linear interpolation of the time grid to arbitrary time instances
-			# `interp_coef` are defined for each `t_out` relative to the time grid interval that contains it
+			# `_interp_coef` are coefficients for linear interpolation of the time grid to arbitrary time instances
+			# `_interp_coef` are defined for each `t_out` relative to the time grid interval that contains it
 			# For example, if `h=0.4` and `t_out=2.3`, then `ind_out=int(2.3/0.4)=5`, i.e, `t_out` is in the 6th interval
-			# Hence `interp_coef=2.3/0.4-5=0.75` and `y[t=2.3] = 0.25*y[i=5] + 0.75*y[i=6]`
+			# Hence `_interp_coef=2.3/0.4-5=0.75` and `y[t=2.3] = 0.25*y[i=5] + 0.75*y[i=6]`
 			self._interp_coef = t_out/self._h - self.ind_out
 
 	########################################
