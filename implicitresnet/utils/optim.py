@@ -65,6 +65,7 @@ class TrainingLoop:
 
 		self.progress_bar = progress_bar
 		self.verbose      = verbose
+		self.eval_init_epoch_loss = eval_init_epoch_loss
 
 		self.loss_history = []
 		self.acc_history = []
