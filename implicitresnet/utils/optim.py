@@ -44,7 +44,7 @@ class TrainingLoop:
 	def __init__(self, model, loss_fn, dataset, batch_size, optimizer, data_augmentation=None, tol=None, tol_target=None,
 		val_dataset=None, val_batch_size=None, accuracy_fn=None, regularizer=None, scheduler=None, lr_schedule=None,
 		checkpoints=None, writer=None, init_epoch=0, min_epochs=0, val_freq=1, stat_freq=1, hist_freq=0, pin_memory=False,
-		verbose=False, progress_bar=True):
+		verbose=False, progress_bar=True, eval_init_epoch_loss=False):
 		self.model       = model
 		self.loss_fn     = loss_fn
 		self.optimizer   = optimizer
@@ -184,30 +184,33 @@ class TrainingLoop:
 
 		###########################################################
 		# initial logs
-		self.model.eval()
-		epoch_loss, epoch_loss_items, epoch_reg_items, epoch_acc_items = self.loss_over_dataset(self.dataloader)
+		if self.eval_init_epoch_loss:
+			self.model.eval()
+			epoch_loss, epoch_loss_items, epoch_reg_items, epoch_acc_items = self.loss_over_dataset(self.dataloader)
 
-		self.log_histograms(self.curr_epoch, self.curr_epoch+epochs)
-		if self.writer is not None:
-			# model evaluation stat
-			for name, module in self.model.named_modules():
-				for key, value in getattr(module,'statistics',{}).items():
-					self.writer.add_scalar(key, value, self.curr_epoch)
+			self.log_histograms(self.curr_epoch, self.curr_epoch+epochs)
+			if self.writer is not None:
+				# model evaluation stat
+				for name, module in self.model.named_modules():
+					for key, value in getattr(module,'statistics',{}).items():
+						self.writer.add_scalar(key, value, self.curr_epoch)
 
-			# training loss, regularizers and accuracy
-			self.writer.add_scalar(f'loss/train', epoch_loss, self.curr_epoch)
-			if len(epoch_loss_items)>1:
-				for key, value in epoch_loss_items.items(): self.writer.add_scalar(f'loss/{key}_train', value, self.curr_epoch)
-			for key, value in epoch_reg_items.items():  self.writer.add_scalar(f'regularizers/{key}',   value, self.curr_epoch)
-			for key, value in epoch_acc_items.items():  self.writer.add_scalar(f'accuracy/{key}_train', value, self.curr_epoch) if len(epoch_acc_items)>1 else self.writer.add_scalar(f'accuracy/train', value, self.curr_epoch)
+				# training loss, regularizers and accuracy
+				self.writer.add_scalar(f'loss/train', epoch_loss, self.curr_epoch)
+				if len(epoch_loss_items)>1:
+					for key, value in epoch_loss_items.items(): self.writer.add_scalar(f'loss/{key}_train', value, self.curr_epoch)
+				for key, value in epoch_reg_items.items():  self.writer.add_scalar(f'regularizers/{key}',   value, self.curr_epoch)
+				for key, value in epoch_acc_items.items():  self.writer.add_scalar(f'accuracy/{key}_train', value, self.curr_epoch) if len(epoch_acc_items)>1 else self.writer.add_scalar(f'accuracy/train', value, self.curr_epoch)
 
-			# validation loss and accuracy
-			if self.val_dataloader is not None:
-				epoch_val_loss, epoch_val_loss_items, _, epoch_val_acc_items = self.loss_over_dataset(self.val_dataloader)
-				self.writer.add_scalar(f'loss/valid', epoch_val_loss, self.curr_epoch)
-				if len(epoch_val_loss_items)>1:
-					for key, value in epoch_val_loss_items.items(): self.writer.add_scalar('loss/'+key+'_valid', value, self.curr_epoch)
-				for key, value in epoch_val_acc_items.items():  self.writer.add_scalar('accuracy/'+key+'_valid', value, self.curr_epoch) if len(epoch_val_acc_items)>1 else self.writer.add_scalar(f'accuracy/valid', value, self.curr_epoch)
+				# validation loss and accuracy
+				if self.val_dataloader is not None:
+					epoch_val_loss, epoch_val_loss_items, _, epoch_val_acc_items = self.loss_over_dataset(self.val_dataloader)
+					self.writer.add_scalar(f'loss/valid', epoch_val_loss, self.curr_epoch)
+					if len(epoch_val_loss_items)>1:
+						for key, value in epoch_val_loss_items.items(): self.writer.add_scalar('loss/'+key+'_valid', value, self.curr_epoch)
+					for key, value in epoch_val_acc_items.items():  self.writer.add_scalar('accuracy/'+key+'_valid', value, self.curr_epoch) if len(epoch_val_acc_items)>1 else self.writer.add_scalar(f'accuracy/valid', value, self.curr_epoch)
+		else:
+			epoch_loss = None
 		###########################################################
 
 		# initial tolerance
