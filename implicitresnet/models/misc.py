@@ -188,8 +188,10 @@ class MLP(Sequential):
 		# activation functions of the hidden layers
 		if isinstance(activation,str):
 			sigma = [choose_activation(activation)]*(depth+1)
-		elif len(activation)!=(depth+1):
-			raise ValueError(f"`activation' must have length depth+1={depth+1}, got {activation}")
+		elif isinstance(activation,list):
+			if len(activation)!=(depth+1):
+				raise ValueError(f"`activation' must have length depth+1={depth+1}, got {activation}")
+			sigma = [choose_activation(a) for a in activation]
 
 		# widths of the hidden layers
 		if isinstance(width,int):
