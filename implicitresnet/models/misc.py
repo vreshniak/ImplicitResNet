@@ -202,7 +202,7 @@ class MLP(Sequential):
 		# widths of the hidden layers
 		if isinstance(bias,bool):
 			bias = [bias]*(depth+2)
-		elif len(bias)!=(depth+1):
+		elif len(bias)!=(depth+2):
 			raise ValueError(f"`bias' must have length depth+2={depth+2}, got {bias}")
 
 		# batch normalization layers
