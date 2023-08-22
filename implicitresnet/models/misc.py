@@ -177,8 +177,8 @@ class BatchNorm3d(_BatchNorm):
 
 class MLP(Sequential):
 	def __init__(self, in_dim: int, out_dim: int, width: Union[int,list], depth: int,
-		activation: Union[str,list] = 'relu', bias: Union[bool,list] = True, spectral_norm=False, batch_norm=False,
-		sn_power_iters=1, bn_track_mean: bool = True, bn_track_variance: bool = True, bn_learn_weight: bool = True, bn_learn_bias: bool = True) -> None:
+		activation: Union[str,list] = 'relu', bias: Union[bool,list] = True, spectral_norm: bool = False, batch_norm: bool = False,
+		sn_power_iters: int = 1, bn_track_mean: bool = True, bn_track_variance: bool = True, bn_learn_weight: bool = True, bn_learn_bias: bool = True) -> None:
 		r""" Multilayer perceptron implemented on top of torch.nn.Sequential.
 		The `depth` is the number of hidden layers, i.e., shallow network has depth 0 and the total number of layers is `depth+2`.
 		If `batch_norm` is True, it is applied to all but last layer.
@@ -199,7 +199,7 @@ class MLP(Sequential):
 		elif len(width)!=(depth+1):
 			raise ValueError(f"`width' must have length depth+1={depth+1}, got {width}")
 
-		# widths of the hidden layers
+		# flags for biases
 		if isinstance(bias,bool):
 			bias = [bias]*(depth+2)
 		elif len(bias)!=(depth+2):
