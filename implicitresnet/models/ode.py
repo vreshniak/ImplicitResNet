@@ -661,20 +661,22 @@ class theta_solver(ode_solver):
 
 			#######################################################################
 			# evaluate quantities for regularizers and statistics
+			check_key = lambda key: self.r_alpha[key]!=0 or any([k in self.r_collect_rhs_stat for k in [key,'all']])
 
-			if self.r_alpha['div']!=0 or any([key in self.r_collect_rhs_stat for key in ['div','all']]):
+			if check_key('div'):
 				int_div = self.r_integrate(lambda t,y: calc.jacobian_diag(lambda x: self.rhs(t,x),y).mean())
 
-			if self.r_alpha['cnt']!=0 or any([key in self.r_collect_rhs_stat for key in ['cnt','all']]):
+			if check_key('cnt'):
 				centers = [ fi.center for fi in self.rhs ]
 
-			if self.r_alpha['rad']!=0 or any([key in self.r_collect_rhs_stat for key in ['rad','all']]):
+			if check_key('rad'):
 				radiuses = [ fi.radius for fi in self.rhs ]
 
-			if self.r_alpha['lip']!=0 or any([key in self.r_collect_rhs_stat for key in ['lip','all']]):
+			if check_key('lip'):
 				lipschitz_constants = [ fi.lipschitz_constant for fi in self.rhs ]
 
-			if self.r_alpha['stabdiv']!=0 or any([key in self.r_collect_rhs_stat for key in ['stabdiv','all']]):
+			# enforce 'zero' stability function
+			if check_key('stabdiv'):
 				if self.rhs_theta!=0:
 					raise NotImplementedError("`stabdiv` regularizer currently works only with `theta=0`")
 				# int_stabdiv = self.r_integrate(lambda t,y: self.stability_function(calc.jacobian_diag(lambda x: self.rhs(t,x),y)).pow(2).mean())
@@ -703,13 +705,13 @@ class theta_solver(ode_solver):
 				# 	int_stabdiv = int_stabdiv + calc.jacobian_frobenius_norm_2(lambda x:x+self.rhs(0,x),y,n=1).mean()/dim
 				# int_stabdiv = int_stabdiv / 2
 
-			if self.r_alpha['stabcnt']!=0 or any([key in self.r_collect_rhs_stat for key in ['stabcnt','all']]):
+			if check_key('stabcnt'):
 				stability_centers = [ fi.stability_center for fi in self.rhs ]
 
-			if self.r_alpha['stabrad']!=0 or any([key in self.r_collect_rhs_stat for key in ['stabrad','all']]):
+			if check_key('stabrad'):
 				stability_radiuses = [ fi.stability_radius for fi in self.rhs ]
 
-			if self.r_alpha['f']!=0 or any([key in self.r_collect_rhs_stat for key in ['f','all']]):
+			if check_key('f'):
 				# int_F2 = self.r_integrate(lambda t,y: self.rhs(t,y).pow(2).mean())
 				int_F2 = self.rhs(0,self._y[0]).pow(2).mean()
 				# int_F2 = (self.rhs(0,self._y[1])+(self._y[1]-self._y[0]).detach()).pow(2).mean()
@@ -732,7 +734,7 @@ class theta_solver(ode_solver):
 					int_dfdn = int_dfdn + ( calc.dFv_dv(lambda x:self.rhs(_t0,x),y0_df,v=df) + 1.0 ).pow(2).mean()
 				int_dfdn = int_dfdn / self.r_alpha['dfdn^samples']
 
-			if self.r_alpha['df']!=0 or any([key in self.r_collect_rhs_stat for key in ['df','all']]):
+			if check_key('df'):
 				# perturbation size
 				if self.r_alpha['df^eps'] == 0: warnings.warn("alpha['df^eps']=0")
 				dfeps = self.r_alpha['df^eps']
