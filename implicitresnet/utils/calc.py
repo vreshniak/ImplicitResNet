@@ -185,9 +185,16 @@ def hessian(output, input, create_graph=False):
 
 
 @torch.enable_grad()
-def jacobian_frobenius_norm_2(F, input, create_graph=True, n=1, rnd='rademacher'):
+def jacobian_frobenius_norm_2(F: Union[Callable[[torch.Tensor],torch.Tensor],torch.Tensor], input: torch.Tensor, n: int = 1, rnd: str = 'rademacher'):
 	'''
 	Compute squared Frobenius norm of the Jacobian of `F` at `input`
+
+	Inputs
+	======
+		F:		function handle or evaluated tensor
+		input:	input (used) to evaluate F
+		n:		number of random samples in Hutchinson estimator
+		rnd:	type of random samples in Hutchinson estimator
 	'''
 	batch_dim = input.shape[0]
 
