@@ -1,5 +1,7 @@
 import torch
 
+from collections.abc import Callable
+from typing import Union, List, Optional
 
 
 ###############################################################################
