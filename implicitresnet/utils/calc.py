@@ -4,6 +4,9 @@ from collections.abc import Callable
 from typing import Union, List, Optional
 
 
+_Tfun = Union[Callable[[torch.Tensor],torch.Tensor],torch.Tensor]
+
+
 ###############################################################################
 
 
@@ -135,10 +138,16 @@ def grad_norm_2(F, input, create_graph=False, normalize=True, p=2):
 	return gradient(output, input, create_graph, normalize, p)
 
 
-def jacobian(F, input, create_graph=False):
+def jacobian(F: _Tfun, input: torch.Tensor, create_graph: bool = False) -> torch.Tensor:
 	'''
 	Compute exact Jacobian of `F`, i.e., `dF/dinput`
 	Evaluation is performed elementwise and is quite inefficient
+
+	Inputs
+	======
+		F:				function handle or evaluated tensor
+		input:			input (used) to evaluate F
+		create_graph:	flag to make result differentiable
 	'''
 	jacobian = []
 
@@ -187,7 +196,7 @@ def hessian(output, input, create_graph=False):
 
 
 @torch.enable_grad()
-def jacobian_frobenius_norm_2(F: Union[Callable[[torch.Tensor],torch.Tensor],torch.Tensor], input: torch.Tensor, n: int = 1, rnd: str = 'rademacher'):
+def jacobian_frobenius_norm_2(F: _Tfun, input: torch.Tensor, n: int = 1, rnd: str = 'rademacher') -> torch.Tensor:
 	'''
 	Compute squared Frobenius norm of the Jacobian of `F` at `input`
 
