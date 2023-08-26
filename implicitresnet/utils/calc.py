@@ -165,6 +165,7 @@ def jacobian(F: _Tfun, input: torch.Tensor, create_graph: bool = False) -> torch
 			outputs=output,
 			inputs=input,
 			grad_outputs=Id,
+			retain_graph=True,
 			create_graph=create_graph,  # need create_graph to find it's derivative
 			only_inputs=True)
 
